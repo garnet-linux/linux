@@ -22,10 +22,10 @@
 
 		framebuffer: framebuffer@b8000000 {
 			compatible = "simple-framebuffer";
-			reg = <0x0 0xb8000000 0x0 (1080 * 2408 * 4)>;
-			width = <1080>;
-			height = <2408>;
-			stride = <(1080 * 4)>;
+			reg = <0x0 0xb8000000 0x0 (1220 * 2712 * 4)>;
+			width = <1220>;
+			height = <2712>;
+			stride = <(1220 * 4)>;
 			format = "a8r8g8b8";
 		};
 	};
