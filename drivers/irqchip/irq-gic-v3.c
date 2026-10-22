@@ -2098,7 +2098,9 @@ static int __init gic_init_bases(phys_addr_t dist_phys_base,
 
 	set_handle_irq(gic_handle_irq);
 
+	garnet_fb_band_early(32, 0xff8080ff);	/* 32 before gic_update_rdist_properties */
 	gic_update_rdist_properties();
+	garnet_fb_band_early(33, 0xffff40c0);	/* 33 after gic_update_rdist_properties */
 
 	gic_cpu_sys_reg_enable();
 	gic_prio_init();

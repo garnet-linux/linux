@@ -284,7 +284,7 @@ static void panic_other_cpus_shutdown(bool crash_kexec)
  *
  *	This function never returns.
  */
-extern void garnet_fb_band(int slot, u32 color);
+extern void garnet_fb_panic(void);
 
 void panic(const char *fmt, ...)
 {
@@ -295,7 +295,7 @@ void panic(const char *fmt, ...)
 	int old_cpu, this_cpu;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
 
-	garnet_fb_band(29, 0xffff00ff);	/* 29 magenta: panic() */
+	garnet_fb_panic();
 
 	if (panic_on_warn) {
 		/*

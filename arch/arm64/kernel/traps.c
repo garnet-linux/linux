@@ -208,8 +208,11 @@ static DEFINE_RAW_SPINLOCK(die_lock);
 /*
  * This function is protected against re-entrancy.
  */
+extern void garnet_fb_dump(u64 pc, u64 lr, u64 esr, u64 far);
+
 void die(const char *str, struct pt_regs *regs, long err)
 {
+	garnet_fb_dump(regs->pc, regs->regs[30], (u64)err, read_sysreg(far_el1));
 	int ret;
 	unsigned long flags;
 

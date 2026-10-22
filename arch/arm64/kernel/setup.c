@@ -281,7 +281,7 @@ u64 cpu_logical_map(unsigned int cpu)
 }
 
 /* GARNET DEBUG: colour bands on the bootloader framebuffer (a8r8g8b8, 1220 px wide, stride 4880) */
-void garnet_fb_band_early(int slot, u32 color)
+static void garnet_fb_stripe_early(int slot, u32 color)
 {
 	size_t len = 4880 * 16, i;
 	void __iomem *p = early_ioremap(0xb8000000UL + (unsigned long)slot * 20 * 4880, len);
@@ -291,6 +291,77 @@ void garnet_fb_band_early(int slot, u32 color)
 	for (i = 0; i < len; i += 4)
 		writel_relaxed(color, p + i);
 	early_iounmap(p, len);
+}
+
+/* progress counter: cell N (left to right) is lit once stage N is reached; yellow = every 5th */
+static void garnet_fb_cell_early(int slot)
+{
+	size_t len = 4880 * 32, r, c;
+	void __iomem *p = early_ioremap(0xb8000000UL + 740UL * 4880, len);
+	u32 color = (slot % 5) ? 0xffffffff : 0xffffff00;
+
+	if (!p)
+		return;
+	for (r = 0; r < 32; r++)
+		for (c = 0; c < 28; c++)
+			writel_relaxed(color, p + r * 4880 + (20 + slot * 33 + c) * 4);
+	early_iounmap(p, len);
+}
+
+void garnet_fb_band_early(int slot, u32 color)
+{
+	garnet_fb_stripe_early(slot, color);
+	garnet_fb_cell_early(slot);
+}
+
+void garnet_fb_panic(void)
+{
+	if (system_state < SYSTEM_FREEING_INITMEM)
+		garnet_fb_band_early(29, 0xffff00ff);	/* 29 magenta: panic() */
+}
+
+/* 5x7 hex font */
+static const u8 garnet_font[16][7] = {
+	{0x0E,0x11,0x13,0x15,0x19,0x11,0x0E}, {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
+	{0x0E,0x11,0x01,0x02,0x04,0x08,0x1F}, {0x1F,0x02,0x04,0x02,0x01,0x11,0x0E},
+	{0x02,0x06,0x0A,0x12,0x1F,0x02,0x02}, {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},
+	{0x06,0x08,0x10,0x1E,0x11,0x11,0x0E}, {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},
+	{0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E}, {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
+	{0x0E,0x11,0x11,0x1F,0x11,0x11,0x11}, {0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
+	{0x0E,0x11,0x10,0x10,0x10,0x11,0x0E}, {0x1C,0x12,0x11,0x11,0x11,0x12,0x1C},
+	{0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F}, {0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},
+};
+
+/* 16 hex digits, 6x scaled, on screen rows 800 + line*50 */
+static void garnet_fb_hex(int line, u64 v)
+{
+	size_t len = 4880 * 42, r;
+	void __iomem *p = early_ioremap(0xb8000000UL + (unsigned long)(800 + line * 50) * 4880, len);
+	int d, c, k;
+
+	if (!p)
+		return;
+	for (r = 0; r < 42; r++)
+		for (d = 0; d < 16; d++) {
+			u8 bits = garnet_font[(v >> (60 - 4 * d)) & 0xf][r / 6];
+
+			for (c = 0; c < 5; c++)
+				for (k = 0; k < 6; k++)
+					writel_relaxed((bits >> (4 - c)) & 1 ? 0xffffffff : 0xff000000,
+						       p + r * 4880 + (30 + d * 42 + c * 6 + k) * 4);
+		}
+	early_iounmap(p, len);
+}
+
+/* crash dump: line 0 = PC, 1 = LR, 2 = ESR, 3 = FAR */
+void garnet_fb_dump(u64 pc, u64 lr, u64 esr, u64 far)
+{
+	if (system_state >= SYSTEM_FREEING_INITMEM)
+		return;
+	garnet_fb_hex(0, pc);
+	garnet_fb_hex(1, lr);
+	garnet_fb_hex(2, esr);
+	garnet_fb_hex(3, far);
 }
 
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
