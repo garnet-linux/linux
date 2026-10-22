@@ -281,7 +281,7 @@ u64 cpu_logical_map(unsigned int cpu)
 }
 
 /* GARNET DEBUG: colour bands on the bootloader framebuffer (a8r8g8b8, 1220 px wide, stride 4880) */
-void __init garnet_fb_band_early(int slot, u32 color)
+void garnet_fb_band_early(int slot, u32 color)
 {
 	size_t len = 4880 * 16, i;
 	void __iomem *p = early_ioremap(0xb8000000UL + (unsigned long)slot * 20 * 4880, len);
@@ -306,6 +306,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	garnet_fb_band_early(0, 0xffff0000);	/* 0 red: setup_arch entered */
 
 	setup_machine_fdt(__fdt_pointer);
+	/* 31: bright green = our DTB (xiaomi,garnet), red = some other DTB */
+	garnet_fb_band_early(31, of_flat_dt_is_compatible(of_get_flat_dt_root(), "xiaomi,garnet") ? 0xff00ff00 : 0xffff0000);
 
 	/*
 	 * Initialise the static keys early as they may be enabled by the
@@ -361,6 +363,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 		unflatten_device_tree();
 
 	bootmem_init();
+	/* 30: green = OUR dtb (xiaomi,garnet), red = some other (stock vendor) dtb */
+	garnet_fb_band_early(30, of_machine_is_compatible("xiaomi,garnet") ? 0xff00ff00 : 0xffff0000);
 
 	kasan_init();
 

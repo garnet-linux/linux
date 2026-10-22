@@ -898,18 +898,9 @@ static void __init early_numa_node_init(void)
 
 /* GARNET DEBUG */
 extern void garnet_fb_band_early(int slot, u32 color);
-void __iomem *garnet_fb_map;
-
 void garnet_fb_band(int slot, u32 color)
 {
-	size_t len = 4880 * 16, i;
-	void __iomem *p;
-
-	if (!garnet_fb_map)
-		return;
-	p = garnet_fb_map + (size_t)slot * 20 * 4880;
-	for (i = 0; i < len; i += 4)
-		writel_relaxed(color, p + i);
+	garnet_fb_band_early(slot, color);
 }
 
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
@@ -980,9 +971,6 @@ void start_kernel(void)
 	garnet_fb_band_early(11, 0xff008080);	/* 11 teal: trap_init done */
 	mm_core_init();
 	garnet_fb_band_early(12, 0xff808000);	/* 12 olive: mm_core_init done */
-	garnet_fb_map = ioremap_wc(0xb8000000UL, 30 * 20 * 4880);
-	if (!garnet_fb_map)
-		garnet_fb_band_early(30, 0xffffffff);	/* 30 white: ioremap_wc of the framebuffer FAILED */
 	poking_init();
 	ftrace_init();
 
@@ -1040,7 +1028,7 @@ void start_kernel(void)
 	softirq_init();
 	timekeeping_init();
 	time_init();
-	garnet_fb_band(23, 0xffff8080);	/* 23 salmon: time_init (arch timer) done */
+	garnet_fb_band_early(23, 0xffff8080);	/* 23 salmon: time_init (arch timer) done */
 
 	/* This must be after timekeeping is initialized */
 	random_init();
@@ -1056,7 +1044,7 @@ void start_kernel(void)
 
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
-	garnet_fb_band(24, 0xff0080ff);	/* 24 sky: irqs enabled */
+	garnet_fb_band_early(24, 0xff0080ff);	/* 24 sky: irqs enabled */
 
 	kmem_cache_init_late();
 
@@ -1066,7 +1054,7 @@ void start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
-	garnet_fb_band(25, 0xffc080ff);	/* 25 violet: console_init done */
+	garnet_fb_band_early(25, 0xffc080ff);	/* 25 violet: console_init done */
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1096,7 +1084,7 @@ void start_kernel(void)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
-	garnet_fb_band(26, 0xff600020);	/* 26 maroon: calibrate_delay done */
+	garnet_fb_band_early(26, 0xff600020);	/* 26 maroon: calibrate_delay done */
 
 	arch_cpu_finalize_init();
 
@@ -1375,6 +1363,7 @@ static void __init do_initcalls(void)
 		/* Parser modifies command_line, restore it each time */
 		strcpy(command_line, saved_command_line);
 		do_initcall_level(level, command_line);
+		garnet_fb_band(31 + level, 0xffffa500);	/* 31..38: one orange-yellow stripe per initcall level 0..7 */
 	}
 
 	kfree(command_line);
@@ -1491,7 +1480,7 @@ static int __ref kernel_init(void *unused)
 {
 	int ret;
 
-	garnet_fb_band(27, 0xff205020);	/* 27 forest: kernel_init reached */
+	garnet_fb_band_early(27, 0xff205020);	/* 27 forest: kernel_init reached */
 
 	/*
 	 * Wait until kthreadd is all set-up.
@@ -1499,7 +1488,7 @@ static int __ref kernel_init(void *unused)
 	wait_for_completion(&kthreadd_done);
 
 	kernel_init_freeable();
-	garnet_fb_band(28, 0xffc0a000);	/* 28 gold: kernel_init_freeable done */
+	garnet_fb_band_early(28, 0xffc0a000);	/* 28 gold: kernel_init_freeable done */
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 
