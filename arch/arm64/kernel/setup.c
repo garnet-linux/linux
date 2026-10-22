@@ -363,8 +363,6 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 		unflatten_device_tree();
 
 	bootmem_init();
-	/* 30: green = OUR dtb (xiaomi,garnet), red = some other (stock vendor) dtb */
-	garnet_fb_band_early(30, of_machine_is_compatible("xiaomi,garnet") ? 0xff00ff00 : 0xffff0000);
 
 	kasan_init();
 
