@@ -896,6 +896,22 @@ static void __init early_numa_node_init(void)
 #endif
 }
 
+/* GARNET DEBUG */
+extern void garnet_fb_band_early(int slot, u32 color);
+void __iomem *garnet_fb_map;
+
+void garnet_fb_band(int slot, u32 color)
+{
+	size_t len = 4880 * 16, i;
+	void __iomem *p;
+
+	if (!garnet_fb_map)
+		return;
+	p = garnet_fb_map + (size_t)slot * 20 * 4880;
+	for (i = 0; i < len; i += 4)
+		writel_relaxed(color, p + i);
+}
+
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
 void start_kernel(void)
 {
@@ -928,7 +944,9 @@ void start_kernel(void)
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
 	setup_per_cpu_areas();
+	garnet_fb_band_early(8, 0xffff80c0);	/* 8 pink: setup_per_cpu_areas done */
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+	garnet_fb_band_early(9, 0xff808080);	/* 9 gray: smp_prepare_boot_cpu done */
 	early_numa_node_init();
 	boot_cpu_hotplug_init();
 
@@ -955,10 +973,16 @@ void start_kernel(void)
 	 * initalization of page allocator
 	 */
 	setup_log_buf(0);
+	garnet_fb_band_early(10, 0xff800000);	/* 10 dark red: setup_log_buf done */
 	vfs_caches_init_early();
 	sort_main_extable();
 	trap_init();
+	garnet_fb_band_early(11, 0xff008080);	/* 11 teal: trap_init done */
 	mm_core_init();
+	garnet_fb_band_early(12, 0xff808000);	/* 12 olive: mm_core_init done */
+	garnet_fb_map = ioremap_wc(0xb8000000UL, 30 * 20 * 4880);
+	if (!garnet_fb_map)
+		garnet_fb_band_early(30, 0xffffffff);	/* 30 white: ioremap_wc of the framebuffer FAILED */
 	poking_init();
 	ftrace_init();
 
@@ -971,6 +995,7 @@ void start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
+	garnet_fb_band_early(13, 0xff008000);	/* 13 dark green: sched_init done */
 
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
@@ -992,6 +1017,7 @@ void start_kernel(void)
 	workqueue_init_early();
 
 	rcu_init();
+	garnet_fb_band_early(14, 0xff000080);	/* 14 navy: rcu_init done */
 	kvfree_rcu_init();
 
 	/* Trace events are available after this */
@@ -1003,7 +1029,9 @@ void start_kernel(void)
 	context_tracking_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+	garnet_fb_band_early(15, 0xff804000);	/* 15 brown: early_irq_init done */
 	init_IRQ();
+	garnet_fb_band_early(22, 0xffa0ffa0);	/* 22 light green: init_IRQ done */
 	tick_init();
 	rcu_init_nohz();
 	init_timers();
@@ -1012,6 +1040,7 @@ void start_kernel(void)
 	softirq_init();
 	timekeeping_init();
 	time_init();
+	garnet_fb_band(23, 0xffff8080);	/* 23 salmon: time_init (arch timer) done */
 
 	/* This must be after timekeeping is initialized */
 	random_init();
@@ -1027,6 +1056,7 @@ void start_kernel(void)
 
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
+	garnet_fb_band(24, 0xff0080ff);	/* 24 sky: irqs enabled */
 
 	kmem_cache_init_late();
 
@@ -1036,6 +1066,7 @@ void start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+	garnet_fb_band(25, 0xffc080ff);	/* 25 violet: console_init done */
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1065,6 +1096,7 @@ void start_kernel(void)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
+	garnet_fb_band(26, 0xff600020);	/* 26 maroon: calibrate_delay done */
 
 	arch_cpu_finalize_init();
 
@@ -1459,12 +1491,15 @@ static int __ref kernel_init(void *unused)
 {
 	int ret;
 
+	garnet_fb_band(27, 0xff205020);	/* 27 forest: kernel_init reached */
+
 	/*
 	 * Wait until kthreadd is all set-up.
 	 */
 	wait_for_completion(&kthreadd_done);
 
 	kernel_init_freeable();
+	garnet_fb_band(28, 0xffc0a000);	/* 28 gold: kernel_init_freeable done */
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 

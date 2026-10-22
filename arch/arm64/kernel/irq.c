@@ -120,11 +120,14 @@ int __init set_handle_fiq(void (*handle_fiq)(struct pt_regs *))
 	return 0;
 }
 
+extern void garnet_fb_band_early(int slot, u32 color);
+
 void __init init_IRQ(void)
 {
 	init_irq_stacks();
 	init_irq_scs();
 	irqchip_init();
+	garnet_fb_band_early(21, 0xffff6000);	/* 21 orange2: irqchip_init returned */
 
 	if (system_uses_irq_prio_masking()) {
 		/*

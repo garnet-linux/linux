@@ -25,6 +25,8 @@
 #include <linux/irqchip.h>
 #include <linux/irqchip/arm-gic-common.h>
 #include <linux/irqchip/arm-gic-v3.h>
+
+extern void garnet_fb_band_early(int slot, u32 color); /* GARNET DEBUG */
 #include <linux/irqchip/arm-gic-v3-prio.h>
 #include <linux/irqchip/irq-partition-percpu.h>
 #include <linux/bitfield.h>
@@ -2101,7 +2103,9 @@ static int __init gic_init_bases(phys_addr_t dist_phys_base,
 	gic_cpu_sys_reg_enable();
 	gic_prio_init();
 	gic_dist_init();
+	garnet_fb_band_early(18, 0xff40ff80);	/* 18 mint: gic_dist_init done */
 	gic_cpu_init();
+	garnet_fb_band_early(19, 0xff00c0a0);	/* 19 aqua: gic_cpu_init done (redistributor scan) */
 	gic_enable_nmi_support();
 	gic_smp_init();
 	gic_cpu_pm_init();
@@ -2294,6 +2298,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	}
 
 	dist_phys_base = res.start;
+	garnet_fb_band_early(16, 0xff80c0ff);	/* 16 light blue: gic dist mapped */
 
 	err = gic_validate_dist_version(dist_base);
 	if (err) {
@@ -2301,6 +2306,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		goto out_unmap_dist;
 	}
 
+	garnet_fb_band_early(17, 0xff80ff00);	/* 17 lime: gic dist version ok */
 	if (of_property_read_u32(node, "#redistributor-regions", &nr_redist_regions))
 		nr_redist_regions = 1;
 
@@ -2331,6 +2337,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	if (err)
 		goto out_unmap_rdist;
 
+	garnet_fb_band_early(20, 0xff400080);	/* 20 dark purple: gic_init_bases ok */
 	gic_populate_ppi_partitions(node);
 
 	if (static_branch_likely(&supports_deactivate_key))

@@ -280,6 +280,19 @@ u64 cpu_logical_map(unsigned int cpu)
 	return __cpu_logical_map[cpu];
 }
 
+/* GARNET DEBUG: colour bands on the bootloader framebuffer (a8r8g8b8, 1220 px wide, stride 4880) */
+void __init garnet_fb_band_early(int slot, u32 color)
+{
+	size_t len = 4880 * 16, i;
+	void __iomem *p = early_ioremap(0xb8000000UL + (unsigned long)slot * 20 * 4880, len);
+
+	if (!p)
+		return;
+	for (i = 0; i < len; i += 4)
+		writel_relaxed(color, p + i);
+	early_iounmap(p, len);
+}
+
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
@@ -290,6 +303,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	early_fixmap_init();
 	early_ioremap_init();
+	garnet_fb_band_early(0, 0xffff0000);	/* 0 red: setup_arch entered */
 
 	setup_machine_fdt(__fdt_pointer);
 
@@ -331,9 +345,12 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 			   FW_BUG "Booted with MMU enabled!");
 	}
 
+	garnet_fb_band_early(1, 0xff00ff00);	/* 1 green: fdt + early params parsed */
 	arm64_memblock_init();
+	garnet_fb_band_early(2, 0xffffff00);	/* 2 yellow: arm64_memblock_init done */
 
 	paging_init();
+	garnet_fb_band_early(3, 0xff00ffff);	/* 3 cyan: paging_init done */
 
 	acpi_table_upgrade();
 
@@ -349,6 +366,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	request_standard_resources();
 
+	garnet_fb_band_early(4, 0xffff8000);	/* 4 orange: bootmem/kasan/resources done */
 	early_ioremap_reset();
 
 	if (acpi_disabled)
@@ -356,11 +374,14 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	else
 		psci_acpi_init();
 
+	garnet_fb_band_early(5, 0xffffffff);	/* 5 white: psci init done */
 	arm64_rsi_init();
 
 	init_bootcpu_ops();
 	smp_init_cpus();
+	garnet_fb_band_early(6, 0xff0000ff);	/* 6 blue: smp_init_cpus done */
 	smp_build_mpidr_hash();
+	garnet_fb_band_early(7, 0xff8000ff);	/* 7 purple: setup_arch finished */
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*
