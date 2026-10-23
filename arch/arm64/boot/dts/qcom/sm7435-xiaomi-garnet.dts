@@ -12,6 +12,13 @@
 	model = "Xiaomi Redmi Note 13 Pro 5G";
 	compatible = "xiaomi,garnet", "qcom,sm7435";
 
+	/*
+	 * Matched by the Qualcomm bootloader (ABL) to select this DTB from
+	 * vendor_boot; without these it refuses to boot the image.
+	 */
+	qcom,msm-id = <583 0x10000>, <537 0x10000>, <613 0x10000>;
+	qcom,board-id = <0x1000b 0>;
+
 	chassis-type = "handset";
 
 	chosen {
