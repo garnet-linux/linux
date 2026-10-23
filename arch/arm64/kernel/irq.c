@@ -124,7 +124,9 @@ void __init init_IRQ(void)
 {
 	init_irq_stacks();
 	init_irq_scs();
+	pr_info("GARNET: calling irqchip_init\n");
 	irqchip_init();
+	pr_info("GARNET: irqchip_init returned\n");
 
 	if (system_uses_irq_prio_masking()) {
 		/*

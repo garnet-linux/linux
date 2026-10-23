@@ -280,6 +280,8 @@ u64 cpu_logical_map(unsigned int cpu)
 	return __cpu_logical_map[cpu];
 }
 
+extern void garnet_fbcon_init(void);
+
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
@@ -290,6 +292,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	early_fixmap_init();
 	early_ioremap_init();
+	garnet_fbcon_init();
+	pr_info("GARNET: setup_arch entered\n");
 
 	setup_machine_fdt(__fdt_pointer);
 
@@ -331,9 +335,11 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 			   FW_BUG "Booted with MMU enabled!");
 	}
 
+	pr_info("GARNET: fdt + early params parsed\n");
 	arm64_memblock_init();
 
 	paging_init();
+	pr_info("GARNET: paging_init done\n");
 
 	acpi_table_upgrade();
 
@@ -349,6 +355,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	request_standard_resources();
 
+	pr_info("GARNET: bootmem/kasan/resources done\n");
 	early_ioremap_reset();
 
 	if (acpi_disabled)
@@ -356,11 +363,14 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	else
 		psci_acpi_init();
 
+	pr_info("GARNET: psci init done\n");
 	arm64_rsi_init();
 
 	init_bootcpu_ops();
 	smp_init_cpus();
+	pr_info("GARNET: smp_init_cpus done\n");
 	smp_build_mpidr_hash();
+	pr_info("GARNET: setup_arch finished\n");
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*

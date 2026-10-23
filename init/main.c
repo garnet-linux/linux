@@ -928,7 +928,9 @@ void start_kernel(void)
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
 	setup_per_cpu_areas();
+	pr_info("GARNET: setup_per_cpu_areas done\n");
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
+	pr_info("GARNET: smp_prepare_boot_cpu done\n");
 	early_numa_node_init();
 	boot_cpu_hotplug_init();
 
@@ -958,7 +960,9 @@ void start_kernel(void)
 	vfs_caches_init_early();
 	sort_main_extable();
 	trap_init();
+	pr_info("GARNET: trap_init done\n");
 	mm_core_init();
+	pr_info("GARNET: mm_core_init done\n");
 	poking_init();
 	ftrace_init();
 
@@ -971,6 +975,7 @@ void start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
+	pr_info("GARNET: sched_init done\n");
 
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
@@ -992,6 +997,7 @@ void start_kernel(void)
 	workqueue_init_early();
 
 	rcu_init();
+	pr_info("GARNET: rcu_init done\n");
 	kvfree_rcu_init();
 
 	/* Trace events are available after this */
@@ -1003,7 +1009,10 @@ void start_kernel(void)
 	context_tracking_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+	pr_info("GARNET: early_irq_init done\n");
+	pr_info("GARNET: calling init_IRQ\n");
 	init_IRQ();
+	pr_info("GARNET: init_IRQ done\n");
 	tick_init();
 	rcu_init_nohz();
 	init_timers();
@@ -1012,6 +1021,7 @@ void start_kernel(void)
 	softirq_init();
 	timekeeping_init();
 	time_init();
+	pr_info("GARNET: time_init done\n");
 
 	/* This must be after timekeeping is initialized */
 	random_init();
@@ -1027,6 +1037,7 @@ void start_kernel(void)
 
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
+	pr_info("GARNET: irqs enabled\n");
 
 	kmem_cache_init_late();
 
@@ -1036,6 +1047,7 @@ void start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+	pr_info("GARNET: console_init done\n");
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1065,6 +1077,7 @@ void start_kernel(void)
 		late_time_init();
 	sched_clock_init();
 	calibrate_delay();
+	pr_info("GARNET: calibrate_delay done\n");
 
 	arch_cpu_finalize_init();
 
@@ -1459,12 +1472,15 @@ static int __ref kernel_init(void *unused)
 {
 	int ret;
 
+	pr_info("GARNET: kernel_init reached\n");
+
 	/*
 	 * Wait until kthreadd is all set-up.
 	 */
 	wait_for_completion(&kthreadd_done);
 
 	kernel_init_freeable();
+	pr_info("GARNET: kernel_init_freeable done\n");
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 

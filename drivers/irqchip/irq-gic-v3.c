@@ -2096,12 +2096,16 @@ static int __init gic_init_bases(phys_addr_t dist_phys_base,
 
 	set_handle_irq(gic_handle_irq);
 
+	pr_info("GARNET: gic: before gic_update_rdist_properties\n");
 	gic_update_rdist_properties();
+	pr_info("GARNET: gic: after gic_update_rdist_properties\n");
 
 	gic_cpu_sys_reg_enable();
 	gic_prio_init();
 	gic_dist_init();
+	pr_info("GARNET: gic_dist_init done\n");
 	gic_cpu_init();
+	pr_info("GARNET: gic_cpu_init done (redistributor scan)\n");
 	gic_enable_nmi_support();
 	gic_smp_init();
 	gic_cpu_pm_init();
@@ -2294,6 +2298,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	}
 
 	dist_phys_base = res.start;
+	pr_info("GARNET: gic dist mapped\n");
 
 	err = gic_validate_dist_version(dist_base);
 	if (err) {
@@ -2301,6 +2306,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		goto out_unmap_dist;
 	}
 
+	pr_info("GARNET: gic dist version ok\n");
 	if (of_property_read_u32(node, "#redistributor-regions", &nr_redist_regions))
 		nr_redist_regions = 1;
 
@@ -2331,6 +2337,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	if (err)
 		goto out_unmap_rdist;
 
+	pr_info("GARNET: gic_init_bases ok\n");
 	gic_populate_ppi_partitions(node);
 
 	if (static_branch_likely(&supports_deactivate_key))
