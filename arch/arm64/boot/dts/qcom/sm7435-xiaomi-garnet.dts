@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Xiaomi Redmi Note 13 Pro 5G / POCO X6 5G (garnet) - STAGE 1
+ * Boots via Mu-Silicium UEFI (EFI stub), display via GOP framebuffer.
+ */
+
+/dts-v1/;
+
+#include "sm7435.dtsi"
+
+/ {
+	model = "Xiaomi Redmi Note 13 Pro 5G";
+	compatible = "xiaomi,garnet", "qcom,sm7435";
+
+	chosen {
+		/* Kernel cmdline comes from the bootloader entry (systemd-boot) */
+	};
+};

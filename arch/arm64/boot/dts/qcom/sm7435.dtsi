@@ -1,0 +1,323 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Qualcomm SM7435 (Snapdragon 7s Gen 2, "parrot") - STAGE 1 skeleton
+ *
+ * Only what is needed to boot to an initramfs via UEFI:
+ * CPUs, PSCI, GICv3, arch timer, reserved memory, ramoops.
+ * Values taken from the stock DTB (Mu-Silicium Resources/DTBs/garnet.dts).
+ *
+ * NOT here yet: clocks, pinctrl, RPMh, regulators, SMMU, UFS, USB, ...
+ */
+
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+/ {
+	interrupt-parent = <&intc>;
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	cpus {
+		#address-cells = <2>;
+		#size-cells = <0>;
+
+		/* 4x Cortex-A55 ("silver") */
+		cpu0: cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x0>;
+			enable-method = "psci";
+		};
+
+		cpu1: cpu@100 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x100>;
+			enable-method = "psci";
+		};
+
+		cpu2: cpu@200 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x200>;
+			enable-method = "psci";
+		};
+
+		cpu3: cpu@300 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a55";
+			reg = <0x0 0x300>;
+			enable-method = "psci";
+		};
+
+		/* 4x Cortex-A78 ("gold") */
+		cpu4: cpu@400 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a78";
+			reg = <0x0 0x400>;
+			enable-method = "psci";
+		};
+
+		cpu5: cpu@500 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a78";
+			reg = <0x0 0x500>;
+			enable-method = "psci";
+		};
+
+		cpu6: cpu@600 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a78";
+			reg = <0x0 0x600>;
+			enable-method = "psci";
+		};
+
+		cpu7: cpu@700 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a78";
+			reg = <0x0 0x700>;
+			enable-method = "psci";
+		};
+
+		cpu-map {
+			cluster0 {
+				core0 { cpu = <&cpu0>; };
+				core1 { cpu = <&cpu1>; };
+				core2 { cpu = <&cpu2>; };
+				core3 { cpu = <&cpu3>; };
+			};
+
+			cluster1 {
+				core0 { cpu = <&cpu4>; };
+				core1 { cpu = <&cpu5>; };
+				core2 { cpu = <&cpu6>; };
+				core3 { cpu = <&cpu7>; };
+			};
+		};
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	/*
+	 * RAM is taken from the UEFI memory map; the stock memory node has
+	 * odd, variant-specific ranges. Zero size = ignored by the kernel.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x0 0x80000000 0x0 0x0>;
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		hyp_mem: hyp@80000000 {
+			reg = <0x0 0x80000000 0x0 0x600000>;
+			no-map;
+		};
+
+		xbl_dtlog_mem: xbl-dtlog@80600000 {
+			reg = <0x0 0x80600000 0x0 0x40000>;
+			no-map;
+		};
+
+		aop_image_mem: aop-image@80800000 {
+			reg = <0x0 0x80800000 0x0 0x60000>;
+			no-map;
+		};
+
+		aop_cmd_db_mem: aop-cmd-db@80860000 {
+			compatible = "qcom,cmd-db";
+			reg = <0x0 0x80860000 0x0 0x20000>;
+			no-map;
+		};
+
+		aop_config_mem: aop-config@80880000 {
+			reg = <0x0 0x80880000 0x0 0x20000>;
+			no-map;
+		};
+
+		tme_crash_dump_mem: tme-crash-dump@808a0000 {
+			reg = <0x0 0x808a0000 0x0 0x40000>;
+			no-map;
+		};
+
+		tme_log_mem: tme-log@808e0000 {
+			reg = <0x0 0x808e0000 0x0 0x4000>;
+			no-map;
+		};
+
+		uefi_log_mem: uefi-log@808e4000 {
+			reg = <0x0 0x808e4000 0x0 0x10000>;
+			no-map;
+		};
+
+		/* TODO stage 2: add compatible = "qcom,smem" + hwlocks once TCSR mutex exists */
+		smem_mem: smem@80900000 {
+			reg = <0x0 0x80900000 0x0 0x200000>;
+			no-map;
+		};
+
+		cpucp_fw_mem: cpucp-fw@80b00000 {
+			reg = <0x0 0x80b00000 0x0 0x100000>;
+			no-map;
+		};
+
+		wlan_fw_mem: wlan-fw@82a00000 {
+			reg = <0x0 0x82a00000 0x0 0x300000>;
+			no-map;
+		};
+
+		camera_mem: camera@84b00000 {
+			reg = <0x0 0x84b00000 0x0 0x800000>;
+			no-map;
+		};
+
+		wpss_mem: wpss@85300000 {
+			reg = <0x0 0x85300000 0x0 0x1900000>;
+			no-map;
+		};
+
+		video_mem: video@86c00000 {
+			reg = <0x0 0x86c00000 0x0 0x700000>;
+			no-map;
+		};
+
+		cdsp_mem: cdsp@89400000 {
+			reg = <0x0 0x89400000 0x0 0xa00000>;
+			no-map;
+		};
+
+		ipa_fw_mem: ipa-fw@89e00000 {
+			reg = <0x0 0x89e00000 0x0 0x10000>;
+			no-map;
+		};
+
+		ipa_gsi_mem: ipa-gsi@89e10000 {
+			reg = <0x0 0x89e10000 0x0 0xa000>;
+			no-map;
+		};
+
+		gpu_microcode_mem: gpu-microcode@89e1a000 {
+			reg = <0x0 0x89e1a000 0x0 0x2000>;
+			no-map;
+		};
+
+		mpss_mem: mpss@8bc00000 {
+			reg = <0x0 0x8bc00000 0x0 0xe600000>;
+			no-map;
+		};
+
+		adsp_mem: adsp@9f500000 {
+			reg = <0x0 0x9f500000 0x0 0x3100000>;
+			no-map;
+		};
+
+		xbl_ramdump_mem: xbl-ramdump@a6b80000 {
+			reg = <0x0 0xa6b80000 0x0 0x280000>;
+			no-map;
+		};
+
+		xbl_sc_mem: xbl-sc@a6e00000 {
+			reg = <0x0 0xa6e00000 0x0 0x40000>;
+			no-map;
+		};
+
+		global_sync_mem: global-sync@a6f00000 {
+			reg = <0x0 0xa6f00000 0x0 0x100000>;
+			no-map;
+		};
+
+		/* Debug: survives reboot, read via /sys/fs/pstore */
+		ramoops@a7000000 {
+			compatible = "ramoops";
+			reg = <0x0 0xa7000000 0x0 0x400000>;
+			record-size = <0x40000>;
+			console-size = <0x200000>;
+			pmsg-size = <0x100000>;
+			no-map;
+		};
+
+		/*
+		 * cont_splash 0xb8000000 (0x2b00000) is intentionally NOT listed:
+		 * the UEFI GOP framebuffer lives around there and the EFI stub
+		 * + simpledrm handle it from the EFI memory map.
+		 */
+
+		cpusys_vm_mem: cpusys-vm@e0600000 {
+			reg = <0x0 0xe0600000 0x0 0x400000>;
+			no-map;
+		};
+
+		trust_ui_vm_mem: trust-ui-vm@e0b00000 {
+			reg = <0x0 0xe0b00000 0x0 0x4af3000>;
+			no-map;
+		};
+
+		trust_ui_vm_qrtr: trust-ui-vm-qrtr@e55f3000 {
+			reg = <0x0 0xe55f3000 0x0 0x9000>;
+			no-map;
+		};
+
+		trust_ui_vm_vblk0_ring: trust-ui-vm-vblk0-ring@e55fc000 {
+			reg = <0x0 0xe55fc000 0x0 0x4000>;
+			no-map;
+		};
+
+		trust_ui_vm_swiotlb: trust-ui-vm-swiotlb@e5600000 {
+			reg = <0x0 0xe5600000 0x0 0x100000>;
+			no-map;
+		};
+
+		tz_stat_mem: tz-stat@e8800000 {
+			reg = <0x0 0xe8800000 0x0 0x100000>;
+			no-map;
+		};
+
+		tags_mem: tags@e8900000 {
+			reg = <0x0 0xe8900000 0x0 0x680000>;
+			no-map;
+		};
+
+		qtee_mem: qtee@e8f80000 {
+			reg = <0x0 0xe8f80000 0x0 0x500000>;
+			no-map;
+		};
+
+		trusted_apps_mem: trusted-apps@e9480000 {
+			reg = <0x0 0xe9480000 0x0 0x1200000>;
+			no-map;
+		};
+	};
+
+	soc: soc@0 {
+		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges = <0 0 0 0 0x10 0>;
+		dma-ranges = <0 0 0 0 0x10 0>;
+
+		intc: interrupt-controller@17200000 {
+			compatible = "arm,gic-v3";
+			reg = <0x0 0x17200000 0x0 0x10000>,	/* GICD */
+			      <0x0 0x17260000 0x0 0x100000>;	/* GICR * 8 */
+			#interrupt-cells = <3>;
+			interrupt-controller;
+			#redistributor-regions = <1>;
+			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_LOW>;
+		};
+
+	};
+
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_PPI 12 IRQ_TYPE_LEVEL_LOW>;
+		always-on;
+	};
+};
