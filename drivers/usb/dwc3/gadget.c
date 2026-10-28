@@ -10,6 +10,7 @@
 
 #include <linux/kernel.h>
 #include <linux/delay.h>
+#include <linux/iopoll.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/platform_device.h>
@@ -314,7 +315,6 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned int cmd,
 {
 	const struct usb_endpoint_descriptor *desc = dep->endpoint.desc;
 	struct dwc3		*dwc = dep->dwc;
-	u32			timeout = 5000;
 	u32			saved_config = 0;
 	u32			reg;
 
@@ -391,45 +391,57 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned int cmd,
 		goto skip_status;
 	}
 
-	do {
-		reg = dwc3_readl(dwc, DWC3_DEPCMD(epnum));
-		if (!(reg & DWC3_DEPCMD_CMDACT)) {
-			cmd_status = DWC3_DEPCMD_STATUS(reg);
+	ret = read_poll_timeout_atomic(dwc3_readl, reg,
+				       !(reg & DWC3_DEPCMD_CMDACT), 1, 5000,
+				       false, dwc, DWC3_DEPCMD(epnum));
+	if (ret) {
+		/* DEBUG: check if the endpoint command completes late */
+		{
+			u32 dbg_loops = 0;
 
-			switch (cmd_status) {
-			case 0:
-				ret = 0;
-				break;
-			case DEPEVT_TRANSFER_NO_RESOURCE:
-				dev_WARN(dwc->dev, "No resource for %s\n",
-					 dep->name);
-				ret = -EINVAL;
-				break;
-			case DEPEVT_TRANSFER_BUS_EXPIRY:
-				/*
-				 * SW issues START TRANSFER command to
-				 * isochronous ep with future frame interval. If
-				 * future interval time has already passed when
-				 * core receives the command, it will respond
-				 * with an error status of 'Bus Expiry'.
-				 *
-				 * Instead of always returning -EINVAL, let's
-				 * give a hint to the gadget driver that this is
-				 * the case by returning -EAGAIN.
-				 */
-				ret = -EAGAIN;
-				break;
-			default:
-				dev_WARN(dwc->dev, "UNKNOWN cmd status\n");
+			while (dbg_loops < 1000) {
+				mdelay(1);
+				dbg_loops++;
+				reg = dwc3_readl(dwc, DWC3_DEPCMD(epnum));
+				if (!(reg & DWC3_DEPCMD_CMDACT)) {
+					dev_err(dwc->dev,
+						"DBG %s: cmd %#x completed after ~%u ms, DEPCMD=%#x\n",
+						dep->name, cmd, dbg_loops, reg);
+					break;
+				}
 			}
-
-			break;
 		}
-	} while (--timeout);
-
-	if (timeout == 0) {
-		ret = -ETIMEDOUT;
+		dev_err(dwc->dev,
+			"DBG DSTS=%#x GDBGLTSSM=%#x GCTL=%#x DCTL=%#x DEPCMD=%#x\n",
+			dwc3_readl(dwc, DWC3_DSTS),
+			dwc3_readl(dwc, 0xc164),
+			dwc3_readl(dwc, DWC3_GCTL),
+			dwc3_readl(dwc, DWC3_DCTL),
+			dwc3_readl(dwc, DWC3_DEPCMD(epnum)));
 		cmd_status = -ETIMEDOUT;
+		dev_err(dwc->dev,
+			"%s: cmd %#x timed out: DEPCMD=%#x DSTS=%#x GUSB2PHYCFG=%#x\n",
+			dep->name, cmd, reg, dwc3_readl(dwc, DWC3_DSTS),
+			dwc3_readl(dwc, DWC3_GUSB2PHYCFG(0)));
+	} else {
+		cmd_status = DWC3_DEPCMD_STATUS(reg);
+
+		switch (cmd_status) {
+		case 0:
+			ret = 0;
+			break;
+		case DEPEVT_TRANSFER_NO_RESOURCE:
+			dev_WARN(dwc->dev, "No resource for %s\n", dep->name);
+			ret = -EINVAL;
+			break;
+		case DEPEVT_TRANSFER_BUS_EXPIRY:
+			ret = -EAGAIN;
+			break;
+		default:
+			dev_err(dwc->dev, "%s: cmd %#x status %d\n",
+				dep->name, cmd, cmd_status);
+			ret = -EINVAL;
+		}
 	}
 
 skip_status:
@@ -2994,6 +3006,13 @@ static int __dwc3_gadget_start(struct dwc3 *dwc)
 		reg &= ~DWC3_DCFG1_DIS_MST_ENH;
 		dwc3_writel(dwc, DWC3_DCFG1, reg);
 	}
+
+	/*
+	 * Program DCFG.DEVSPD (HS-only here) before the first endpoint command.
+	 * Left at the SuperSpeed reset default with no SS PHY/pipe clock, the
+	 * DEPCFG command for ep0 never completes (CMDACT stays set).
+	 */
+	__dwc3_gadget_set_speed(dwc);
 
 	/* Start with SuperSpeed Default */
 	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);

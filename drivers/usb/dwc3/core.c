@@ -1054,6 +1054,8 @@ static void dwc3_core_setup_global_control(struct dwc3 *dwc)
 			reg |= DWC3_GCTL_DSBLCLKGTNG | DWC3_GCTL_SOFITPSYNC;
 		else
 			reg &= ~DWC3_GCTL_DSBLCLKGTNG;
+		if (dwc->dis_clk_gating_quirk)
+			reg |= DWC3_GCTL_DSBLCLKGTNG;
 		break;
 	case DWC3_GHWPARAMS1_EN_PWROPT_HIB:
 		/*
@@ -1830,6 +1832,8 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 				"snps,rx_detect_poll_quirk");
 	dwc->dis_u3_susphy_quirk = device_property_read_bool(dev,
 				"snps,dis_u3_susphy_quirk");
+	dwc->dis_clk_gating_quirk = device_property_read_bool(dev,
+				"snps,disable-clk-gating");
 	dwc->dis_u2_susphy_quirk = device_property_read_bool(dev,
 				"snps,dis_u2_susphy_quirk");
 	dwc->dis_enblslpm_quirk = device_property_read_bool(dev,
