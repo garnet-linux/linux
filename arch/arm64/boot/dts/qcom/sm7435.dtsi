@@ -310,6 +310,36 @@
 			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_LOW>;
 		};
 
+
+		/*
+		 * USB (stage 2a, EXPERIMENTAL): dwc3 + Qualcomm glue, relying on the
+		 * clocks, GDSC and HS PHY that Mu-Silicium UEFI already brought up
+		 * (boot with clk_ignore_unused pd_ignore_unused). No GCC/PHY/regulator
+		 * drivers exist for this SoC yet, so none are referenced here.
+		 * Stock node: ssusb@a600000 (core 0xa600000, qscratch = +0xf8800).
+		 */
+		usb: usb@a600000 {
+			compatible = "qcom,sm7435-dwc3", "qcom,snps-dwc3";
+			reg = <0x0 0x0a600000 0x0 0x100000>;
+			interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "dwc_usb3";
+			/*
+			 * Stock has dma-coherent, but that relies on the SMMU setup we do not
+			 * have yet: with it dwc3 read stale zero event buffers
+			 * ("unknown endpoint event 0"). Use explicit cache maintenance.
+			 */
+
+			snps,has-lpm-erratum;
+			snps,hird-threshold = /bits/ 8 <0x0>;
+			snps,is-utmi-l1-suspend;
+			snps,usb2-gadget-lpm-disable;
+			snps,dis-u1-entry-quirk;
+			snps,dis-u2-entry-quirk;
+			snps,dis_u2_susphy_quirk;
+			snps,dis_u3_susphy_quirk;
+
+			status = "disabled";
+		};
 	};
 
 	timer {

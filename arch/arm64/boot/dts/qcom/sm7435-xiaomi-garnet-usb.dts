@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Xiaomi Redmi Note 13 Pro 5G (garnet) - stage 2a: USB gadget experiment.
+ *
+ * Same as the stage-1 board plus the dwc3 controller in peripheral mode,
+ * high-speed only (the SS/QMP PHY is not initialised by Linux yet).
+ */
+
+/dts-v1/;
+
+#include "sm7435-xiaomi-garnet.dts"
+
+&usb {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	/* no SS PHY driver: don't wait for the pipe clock */
+	qcom,select-utmi-as-pipe-clk;
+};
