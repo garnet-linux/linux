@@ -329,6 +329,12 @@
 			 * ("unknown endpoint event 0"). Use explicit cache maintenance.
 			 */
 
+			/*
+			 * Qualcomm HS (femto) PHY is 16-bit UTMI+. GUSB2PHYCFG reads back
+			 * PHYIF=0 (8-bit), USBTRDTIM=9: width/turnaround mismatch stalls
+			 * ep0 DEPCFG. Force 16-bit (PHYIF=1, USBTRDTIM=5).
+			 */
+			phy_type = "utmi_wide";
 			snps,has-lpm-erratum;
 			snps,hird-threshold = /bits/ 8 <0x0>;
 			snps,is-utmi-l1-suspend;
