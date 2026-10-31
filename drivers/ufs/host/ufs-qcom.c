@@ -1641,9 +1641,15 @@ static int ufs_qcom_init(struct ufs_hba *hba)
 		}
 	}
 
-	err = ufs_qcom_icc_init(host);
-	if (err)
-		goto out_variant_clear;
+	/*
+	 * The interconnect paths are not available on all platforms, skip the
+	 * bandwidth votes if the SoC does not have them.
+	 */
+	if (!drvdata || !drvdata->no_icc) {
+		err = ufs_qcom_icc_init(host);
+		if (err)
+			goto out_variant_clear;
+	}
 
 	host->device_reset = devm_gpiod_get_optional(dev, "reset",
 						     GPIOD_OUT_HIGH);
@@ -3046,8 +3052,17 @@ static const struct ufs_qcom_drvdata ufs_qcom_sa8255p_drvdata = {
 	.vops = &ufs_hba_qcom_sa8255p_vops
 };
 
+/*
+ * SM7435 (Parrot) has no interconnect support in the mainline device tree
+ * yet, so the bandwidth votes are skipped for it.
+ */
+static const struct ufs_qcom_drvdata ufs_qcom_sm7435_drvdata = {
+	.no_icc = true,
+};
+
 static const struct of_device_id ufs_qcom_of_match[] __maybe_unused = {
 	{ .compatible = "qcom,ufshc" },
+	{ .compatible = "qcom,sm7435-ufshc", .data = &ufs_qcom_sm7435_drvdata },
 	{ .compatible = "qcom,sm8550-ufshc", .data = &ufs_qcom_sm8550_drvdata },
 	{ .compatible = "qcom,sm8650-ufshc", .data = &ufs_qcom_sm8550_drvdata },
 	{ .compatible = "qcom,sa8255p-ufshc", .data = &ufs_qcom_sa8255p_drvdata },

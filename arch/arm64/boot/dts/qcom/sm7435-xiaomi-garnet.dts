@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Xiaomi Redmi Note 13 Pro 5G / POCO X6 5G (garnet) - STAGE 1
+ * Xiaomi Redmi Note 13 Pro 5G / POCO X6 5G (garnet)
+ *
  * Boots via Mu-Silicium UEFI (EFI stub), display via GOP framebuffer.
+ * Also brings up the embedded UFS device and the dwc3 controller in
+ * peripheral mode, high-speed only (the SS/QMP PHY is not initialised by
+ * Linux yet).
  */
 
 /dts-v1/;
@@ -15,4 +19,24 @@
 	chosen {
 		/* Kernel cmdline comes from the bootloader entry (systemd-boot) */
 	};
+};
+
+/*
+ * UFS: the device stores the rootfs on an embedded UFS device, the stock
+ * device tree enables both the host controller and the QMP PHY.
+ */
+&ufs_mem_hc {
+	status = "ok";
+};
+
+&ufs_mem_phy {
+	status = "ok";
+};
+
+&usb {
+	status = "okay";
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	/* no SS PHY driver: don't wait for the pipe clock */
+	qcom,select-utmi-as-pipe-clk;
 };

@@ -9,6 +9,7 @@
  * NOT here yet: clocks, pinctrl, RPMh, regulators, SMMU, UFS, USB, ...
  */
 
+#include <dt-bindings/clock/qcom,gcc-sm7435.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
@@ -348,6 +349,134 @@
 
 			status = "disabled";
 		};
+
+		/*
+		 * Global clock controller (stage 2b).
+		 *
+		 * Only the clocks needed by the UFS host controller and the QMP
+		 * UFS PHY are implemented in drivers/clk/qcom/gcc-sm7435.c so far.
+		 * The register offsets are taken from the downstream
+		 * "qcom,parrot-gcc" driver.
+		 */
+		gcc: clock-controller@100000 {
+			compatible = "qcom,gcc-sm7435";
+			reg = <0x0 0x100000 0x0 0x1f4200>;
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			#power-domain-cells = <1>;
+
+			clocks = <&bi_tcxo>,
+				 <&ufs_mem_phy 0>,
+				 <&ufs_mem_phy 1>,
+				 <&ufs_mem_phy 2>;
+			clock-names = "bi_tcxo",
+				      "ufs_phy_rx_symbol_0_clk",
+				      "ufs_phy_rx_symbol_1_clk",
+				      "ufs_phy_tx_symbol_0_clk";
+		};
+
+		/*
+		 * UFS host controller (stage 2b).
+		 *
+		 * Stock node: ufshc@1d84000 (core 0x1d84000, ICE 0x1d88000,
+		 * ICE hwkm 0x1d90000), interrupt 265.
+		 */
+		ufs_mem_hc: ufshc@1d84000 {
+			compatible = "qcom,sm7435-ufshc", "qcom,ufshc",
+				     "jedec,ufs-2.0";
+			reg = <0x0 0x1d84000 0x0 0x3000>;
+			interrupts = <GIC_SPI 265 IRQ_TYPE_LEVEL_HIGH>;
+
+			phys = <&ufs_mem_phy>;
+			phy-names = "ufsphy";
+			lanes-per-direction = <2>;
+
+			/* The UFS PHY is reset through the host controller. */
+			#reset-cells = <1>;
+			resets = <&gcc GCC_UFS_PHY_BCR>;
+			reset-names = "rst";
+
+			power-domains = <&gcc UFS_PHY_GDSC>;
+
+			clock-names =
+				"core_clk",
+				"bus_aggr_clk",
+				"iface_clk",
+				"core_clk_unipro",
+				"ref_clk",
+				"tx_lane0_sync_clk",
+				"rx_lane0_sync_clk",
+				"rx_lane1_sync_clk";
+			clocks =
+				<&gcc GCC_UFS_PHY_AXI_CLK>,
+				<&gcc GCC_AGGRE_UFS_PHY_AXI_CLK>,
+				<&gcc GCC_UFS_PHY_AHB_CLK>,
+				<&gcc GCC_UFS_PHY_UNIPRO_CORE_CLK>,
+				<&bi_tcxo>,
+				<&gcc GCC_UFS_PHY_TX_SYMBOL_0_CLK>,
+				<&gcc GCC_UFS_PHY_RX_SYMBOL_0_CLK>,
+				<&gcc GCC_UFS_PHY_RX_SYMBOL_1_CLK>;
+			freq-table-hz =
+				<75000000 300000000>,
+				<0 0>,
+				<0 0>,
+				<75000000 300000000>,
+				/* ref_clk is a fixed 19.2 MHz clock, do not reprogram it */
+				<0 0>,
+				<0 0>,
+				<0 0>,
+				<0 0>;
+
+			/* 19.2 MHz reference clock for the host and the device */
+			ref-clk-freq = <19200000>;
+
+			/*
+			 * No SMMU is set up yet, so keep the accesses coherent
+			 * instead of relying on an IOMMU.
+			 */
+			dma-coherent;
+
+			status = "disabled";
+		};
+
+		/*
+		 * QMP UFS PHY (stage 2b).
+		 *
+		 * Stock node: ufsphy_mem@1d87000, "qcom,ufs-phy-qmp-v4-parrot".
+		 * The symbol clocks exported by this node are the parents of
+		 * the GCC symbol clock multiplexers.
+		 */
+		ufs_mem_phy: phy@1d87000 {
+			compatible = "qcom,sm7435-qmp-ufs-phy";
+			reg = <0x0 0x1d87000 0x0 0x1000>;
+
+			clock-names = "ref", "ref_aux", "qref";
+			clocks = <&bi_tcxo>,
+				 <&gcc GCC_UFS_PHY_PHY_AUX_CLK>,
+				 <&gcc GCC_UFS_0_CLKREF_EN>;
+
+			power-domains = <&gcc UFS_PHY_GDSC>;
+
+			resets = <&ufs_mem_hc 0>;
+			reset-names = "ufsphy";
+
+			#clock-cells = <1>;
+			#phy-cells = <0>;
+
+			status = "disabled";
+		};
+	};
+
+	/*
+	 * 19.2 MHz TCXO.  On the SM7435 this clock is provided by the RPMh
+	 * subsystem ("bi_tcxo" in the stock device tree); there is no RPMh
+	 * clock driver in this kernel yet, so it is described as a fixed
+	 * clock.  Replace it with the RPMh clock once that is ported.
+	 */
+	bi_tcxo: bi-tcxo {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <19200000>;
 	};
 
 	timer {

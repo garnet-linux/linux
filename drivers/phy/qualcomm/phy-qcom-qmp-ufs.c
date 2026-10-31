@@ -1716,6 +1716,45 @@ static const struct qmp_phy_cfg sm8450_ufsphy_cfg = {
 	.regs			= ufsphy_v5_regs_layout,
 };
 
+/*
+ * SM7435 (Parrot) uses the same QMP UFS PHY as SM8450.  The PHY rails
+ * (vdda-phy and vdda-pll) are supplied by the PM6450 LDOs which are not
+ * driven by mainline yet, so no regulators are requested here: the rails are
+ * left enabled by the bootloader.
+ */
+static const struct qmp_phy_cfg sm7435_ufsphy_cfg = {
+	.lanes			= 2,
+
+	.offsets		= &qmp_ufs_offsets,
+	.max_supported_gear	= UFS_HS_G4,
+
+	.tbls = {
+		.serdes		= sm8350_ufsphy_serdes,
+		.serdes_num	= ARRAY_SIZE(sm8350_ufsphy_serdes),
+		.tx		= sm8350_ufsphy_tx,
+		.tx_num		= ARRAY_SIZE(sm8350_ufsphy_tx),
+		.rx		= sm8350_ufsphy_rx,
+		.rx_num		= ARRAY_SIZE(sm8350_ufsphy_rx),
+		.pcs		= sm8350_ufsphy_pcs,
+		.pcs_num	= ARRAY_SIZE(sm8350_ufsphy_pcs),
+	},
+	.tbls_hs_b = {
+		.serdes		= sm8350_ufsphy_hs_b_serdes,
+		.serdes_num	= ARRAY_SIZE(sm8350_ufsphy_hs_b_serdes),
+	},
+	.tbls_hs_overlay[0] = {
+		.tx		= sm8350_ufsphy_g4_tx,
+		.tx_num		= ARRAY_SIZE(sm8350_ufsphy_g4_tx),
+		.rx		= sm8350_ufsphy_g4_rx,
+		.rx_num		= ARRAY_SIZE(sm8350_ufsphy_g4_rx),
+		.pcs		= sm8350_ufsphy_g4_pcs,
+		.pcs_num	= ARRAY_SIZE(sm8350_ufsphy_g4_pcs),
+		.max_gear	= UFS_HS_G4,
+	},
+	.num_vregs		= 0,
+	.regs			= ufsphy_v5_regs_layout,
+};
+
 static const struct qmp_phy_cfg sm8475_ufsphy_cfg = {
 	.lanes			= 2,
 
@@ -2352,11 +2391,13 @@ static int qmp_ufs_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ret = devm_regulator_bulk_get_const(dev, qmp->cfg->num_vregs,
-					    qmp->cfg->vreg_list,
-					    &qmp->vregs);
-	if (ret)
-		return ret;
+	if (qmp->cfg->num_vregs) {
+		ret = devm_regulator_bulk_get_const(dev, qmp->cfg->num_vregs,
+						    qmp->cfg->vreg_list,
+						    &qmp->vregs);
+		if (ret)
+			return ret;
+	}
 
 	/* Check for legacy binding with child node. */
 	np = of_get_next_available_child(dev->of_node, NULL);
@@ -2445,6 +2486,9 @@ static const struct of_device_id qmp_ufs_of_match_table[] = {
 	}, {
 		.compatible = "qcom,sm8350-qmp-ufs-phy",
 		.data = &sm8350_ufsphy_cfg,
+	}, {
+		.compatible = "qcom,sm7435-qmp-ufs-phy",
+		.data = &sm7435_ufsphy_cfg,
 	}, {
 		.compatible = "qcom,sm8450-qmp-ufs-phy",
 		.data = &sm8450_ufsphy_cfg,
