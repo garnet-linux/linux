@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/input/focaltech,ft3683g-spi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Focaltech FT3683G touchscreen (SPI)
+
+maintainers:
+  - Ximi <ximiyadka124@proton.me>
+
+description: >
+  The Focaltech FT3683G is a capacitive touchscreen controller that is
+  connected over SPI.  It is used on a number of Qualcomm based smartphones,
+  among them the Xiaomi Redmi Note 13 Pro 5G (garnet).
+
+  The chip reports up to ten simultaneous touch points in the "protocol v2"
+  format used by this driver.
+
+allOf:
+  - $ref: /schemas/spi/spi-consumer.yaml#
+
+properties:
+  compatible:
+    const: focaltech,n16-3683g-spi
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    description: >
+      Interrupt line of the touchscreen controller.  If this property is
+      missing, the driver derives the interrupt from the
+      focaltech,irq-gpio property.
+    maxItems: 1
+
+  focaltech,reset-gpio:
+    description: >
+      GPIO connected to the reset pin of the controller.  The pin is driven
+      low and high again to reset the controller during probe and resume.
+    maxItems: 1
+
+  focaltech,irq-gpio:
+    description: >
+      GPIO connected to the interrupt line of the controller.  Only needed
+      when the interrupt is not described with the interrupts property.
+    maxItems: 1
+
+  focaltech,max-touch-number:
+    description: >
+      Maximum number of touch points reported by the controller.  Values
+      outside of the 2..10 range are clamped.
+    default: 10
+    maximum: 10
+    minimum: 2
+
+  focaltech,super-resolution-factors:
+    description: >
+      Number of sub-pixel steps the controller reports per touch point.
+    default: 1
+
+  focaltech,display-coords:
+    description: >
+      Resolution of the display the touchscreen is attached to, given as
+      x_min, y_min, x_max and y_max.  The values are used to scale the
+      coordinates reported by the controller.
+    minItems: 4
+    maxItems: 4
+
+  focaltech,have-key:
+    type: boolean
+    description: >
+      Indicates that the controller reports keys.  Only supported by the
+      vendor driver.
+
+  focaltech,key-number:
+    description: Number of keys reported by the controller.
+    maximum: 4
+
+  focaltech,keys:
+    description: Key codes reported by the controller.
+    minItems: 1
+    maxItems: 4
+
+  focaltech,key-x-coords:
+    description: X coordinates of the keys.
+    minItems: 1
+    maxItems: 4
+
+  focaltech,key-y-coords:
+    description: Y coordinates of the keys.
+    minItems: 1
+    maxItems: 4
+
+  avdd-supply:
+    description: Regulator powering the analog part of the controller.
+
+  iovdd-supply:
+    description: Regulator powering the digital I/O part of the controller.
+
+  vddio-supply:
+    description: Regulator powering the digital I/O part of the controller.
+
+  vci-supply:
+    description: Regulator powering the controller.
+
+additionalProperties: false
+
+required:
+  - compatible
+  - reg
+  - focaltech,display-coords
+
+examples:
+  - |
+    spi9 {
+        compatible = "qcom,spi-geni";
+        reg = <0xa8c000 0x4000>;
+        interrupts = <0 0x164 0x4>;
+
+        touchscreen@0 {
+            compatible = "focaltech,n16-3683g-spi";
+            reg = <0>;
+            interrupt-parent = <&tlmm>;
+            interrupts = <98 IRQ_TYPE_EDGE_FALLING>;
+
+            focaltech,reset-gpio = <&tlmm 96 GPIO_ACTIVE_HIGH>;
+            focaltech,irq-gpio = <&tlmm 98 (GPIO_ACTIVE_LOW | GPIO_TRANSITORY)>;
+
+            focaltech,max-touch-number = <10>;
+            focaltech,super-resolution-factors = <16>;
+            focaltech,display-coords = <0 0 19520 43392>;
+
+            avdd-supply = <&vdd_touch>;
+            iovdd-supply = <&vddio_touch>;
+        };
+    };
+...
