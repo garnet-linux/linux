@@ -10,6 +10,7 @@
  */
 
 #include <dt-bindings/clock/qcom,gcc-sm7435.h>
+#include <dt-bindings/dma/qcom-gpi.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
@@ -373,6 +374,72 @@
 				      "ufs_phy_rx_symbol_0_clk",
 				      "ufs_phy_rx_symbol_1_clk",
 				      "ufs_phy_tx_symbol_0_clk";
+		};
+
+		tlmm: pinctrl@f000000 {
+			compatible = "qcom,sm7435-tlmm";
+			reg = <0x0 0x0f000000 0x0 0x1000000>;
+			interrupts = <GIC_SPI 208 IRQ_TYPE_LEVEL_HIGH>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-ranges = <&tlmm 0 0 142>;
+			/* TZ owned (fingerprint/secure) lines: 0-3, 38 */
+			gpio-reserved-ranges = <0 4>, <38 1>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+
+		/*
+		 * GPI DMA for QUPv3 wrapper 1. The serial engines have their FIFO
+		 * interface disabled, so SPI/I2C/UART transfers must use GPI DMA.
+		 */
+		gpi_dma1: dma-controller@a00000 {
+			compatible = "qcom,sm7435-gpi-dma", "qcom,sm6350-gpi-dma";
+			reg = <0x0 0x00a00000 0x0 0x60000>;
+			interrupts = <GIC_SPI 279 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 280 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 283 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 284 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 293 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 294 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 295 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 296 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 297 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 298 IRQ_TYPE_LEVEL_HIGH>;
+			dma-channels = <12>;
+			dma-channel-mask = <0x3e>;
+			#dma-cells = <3>;
+			/* no SMMU node yet: relies on the bootloader's SMMU setup */
+		};
+
+		/* QUPv3 wrapper 1 (serial engines 6..11 in downstream naming) */
+		qupv3_1: geniqup@ac0000 {
+			compatible = "qcom,geni-se-qup";
+			reg = <0x0 0x00ac0000 0x0 0x2000>;
+			clocks = <&gcc GCC_QUPV3_WRAP_1_M_AHB_CLK>,
+				 <&gcc GCC_QUPV3_WRAP_1_S_AHB_CLK>;
+			clock-names = "m-ahb", "s-ahb";
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+			status = "disabled";
+
+			/* wrapper 1 SE3 (downstream: qupv3_se9_spi) */
+			spi9: spi@a8c000 {
+				compatible = "qcom,geni-spi";
+				reg = <0x0 0x00a8c000 0x0 0x4000>;
+				interrupts = <GIC_SPI 356 IRQ_TYPE_LEVEL_HIGH>;
+				clocks = <&gcc GCC_QUPV3_WRAP1_S3_CLK>;
+				clock-names = "se";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				dmas = <&gpi_dma1 0 3 QCOM_GPI_SPI>,
+				       <&gpi_dma1 1 3 QCOM_GPI_SPI>;
+				dma-names = "tx", "rx";
+				status = "disabled";
+			};
 		};
 
 		/*

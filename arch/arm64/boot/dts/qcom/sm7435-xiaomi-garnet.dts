@@ -10,6 +10,9 @@
 
 /dts-v1/;
 
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
 #include "sm7435.dtsi"
 
 / {
@@ -18,6 +21,31 @@
 
 	chosen {
 		/* Kernel cmdline comes from the bootloader entry (systemd-boot) */
+	};
+
+	/*
+	 * Touchscreen rails. Downstream: iovdd is a fixed regulator enabled by
+	 * pm6150l GPIO3 (1.8 V) and avdd is PMIC LDO L9E (3.224 V). There is
+	 * no SPMI/RPMh support in this tree yet, so these are placeholders that
+	 * rely on the bootloader having left the rails on. Replace them with
+	 * the real regulators once the PMICs are described.
+	 */
+	ts_vddio: regulator-ts-vddio {
+		compatible = "regulator-fixed";
+		regulator-name = "ts_vddio";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	ts_avdd: regulator-ts-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "ts_avdd";
+		regulator-min-microvolt = <3224000>;
+		regulator-max-microvolt = <3224000>;
+		regulator-always-on;
+		regulator-boot-on;
 	};
 };
 
@@ -39,4 +67,86 @@
 	maximum-speed = "high-speed";
 	/* no SS PHY driver: don't wait for the pipe clock */
 	qcom,select-utmi-as-pipe-clk;
+};
+
+&tlmm {
+	ts_spi_default: ts-spi-default-state {
+		miso-pins {
+			pins = "gpio10";
+			function = "qup1_se3_l0";
+			drive-strength = <6>;
+			bias-disable;
+		};
+
+		mosi-pins {
+			pins = "gpio11";
+			function = "qup1_se3_l1";
+			drive-strength = <4>;
+			bias-disable;
+		};
+
+		clk-pins {
+			pins = "gpio12";
+			function = "qup1_se3_l2";
+			drive-strength = <4>;
+			bias-disable;
+		};
+
+		cs-pins {
+			pins = "gpio13";
+			function = "qup1_se3_l3";
+			drive-strength = <6>;
+			bias-disable;
+		};
+	};
+
+	/* no "function": the GPIO is requested by the touchscreen driver */
+	ts_int_default: ts-int-default-state {
+		pins = "gpio98";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	ts_reset_default: ts-reset-default-state {
+		pins = "gpio96";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+};
+
+&qupv3_1 {
+	status = "okay";
+};
+
+&spi9 {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&ts_spi_default>;
+
+	/*
+	 * Goodix GT9916S ("Berlin D") on the CSOT panel, handled by the
+	 * mainline goodix_berlin_spi driver. Some garnet panels carry a
+	 * FocalTech FT3683G on the same bus instead (downstream lists both
+	 * under one n16-touch node); that variant needs the out-of-tree
+	 * focaltech_3683g driver ("focaltech,n16-3683g-spi").
+	 */
+	touchscreen@0 {
+		compatible = "goodix,gt9916";
+		reg = <0>;
+		spi-max-frequency = <12000000>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <98 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 96 GPIO_ACTIVE_LOW>;
+
+		avdd-supply = <&ts_avdd>;
+		vddio-supply = <&ts_vddio>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
+
+		touchscreen-size-x = <1220>;
+		touchscreen-size-y = <2712>;
+	};
 };
