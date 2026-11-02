@@ -371,30 +371,18 @@ config TOUCHSCREEN_EXC3000
 	  module will be called exc3000.
 
 config TOUCHSCREEN_FOCALTECH_3683G
-	tristate "Focaltech FT3683G touchscreen"
+	tristate "FocalTech FT3683G SPI touchscreen"
 	depends on SPI
-	depends on GPIOLIB || COMPILE_TEST
+	depends on OF || COMPILE_TEST
 	help
-	  Say Y here if you have a Focaltech FT3683G touchscreen
-	  connected over SPI.
+	  Say Y here if you have a FocalTech FT3683G touchscreen
+	  controller connected over SPI, e.g. on the Redmi Note 13 Pro 5G
+	  (garnet).
 
 	  If unsure, say N.
 
 	  To compile this driver as a module, choose M here: the
-	  module will be called focaltech_3683g.
-
-config TOUCHSCREEN_FUJITSU
-	tristate "Fujitsu serial touchscreen"
-	select SERIO
-	help
-	  Say Y here if you have the Fujitsu touchscreen (such as one
-	  installed in Lifebook P series laptop) connected to your
-	  system.
-
-	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called fujitsu-ts.
+	  module will be called focaltech_ft3683g.
 
 config TOUCHSCREEN_GOODIX
 	tristate "Goodix I2C touchscreen"

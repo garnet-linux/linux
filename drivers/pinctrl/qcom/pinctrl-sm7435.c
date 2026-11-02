@@ -1306,7 +1306,7 @@ static const char * const wlan2_adc_dtest1_groups[] = {
 };
 
 static const struct pinfunction sm7435_functions[] = {
-	MSM_PIN_FUNCTION(gpio),
+	MSM_GPIO_PIN_FUNCTION(gpio),
 	MSM_PIN_FUNCTION(PCIE0_CLK_REQ),
 	MSM_PIN_FUNCTION(QSPI0),
 	MSM_PIN_FUNCTION(QSPI1),

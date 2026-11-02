@@ -100,15 +100,17 @@
 		};
 	};
 
-	/* no "function": the GPIO is requested by the touchscreen driver */
+	/* the GPIOs are requested by the touchscreen driver */
 	ts_int_default: ts-int-default-state {
 		pins = "gpio98";
+		function = "gpio";
 		drive-strength = <8>;
 		bias-pull-up;
 	};
 
 	ts_reset_default: ts-reset-default-state {
 		pins = "gpio96";
+		function = "gpio";
 		drive-strength = <8>;
 		bias-pull-up;
 	};
@@ -125,20 +127,26 @@
 	pinctrl-0 = <&ts_spi_default>;
 
 	/*
-	 * Goodix GT9916S ("Berlin D") on the CSOT panel, handled by the
-	 * mainline goodix_berlin_spi driver. Some garnet panels carry a
-	 * FocalTech FT3683G on the same bus instead (downstream lists both
-	 * under one n16-touch node); that variant needs the out-of-tree
-	 * focaltech_3683g driver ("focaltech,n16-3683g-spi").
+	 * FocalTech FT3683G on the same bus/pins as the Goodix GT9916S that
+	 * other garnet panels use (downstream lists both under one node).
+	 * For a Goodix panel use compatible = "goodix,gt9916" with
+	 * touchscreen-size-x/y = <1220>/<2712> and IRQ_TYPE_LEVEL_LOW.
+	 *
+	 * The FocalTech controller reports 1/16 pixel units: 1220x2712 px
+	 * panel -> 19520x43392.
+	 *
+	 * Interrupt and reset polarity are the ones the vendor driver uses
+	 * (downstream: interrupts = <98 IRQ_TYPE_LEVEL_LOW>,
+	 * focaltech,reset-gpio = <&tlmm 96 0x00>).
 	 */
 	touchscreen@0 {
-		compatible = "goodix,gt9916";
+		compatible = "focaltech,ft3683g";
 		reg = <0>;
 		spi-max-frequency = <12000000>;
 
 		interrupt-parent = <&tlmm>;
 		interrupts = <98 IRQ_TYPE_LEVEL_LOW>;
-		reset-gpios = <&tlmm 96 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&tlmm 96 GPIO_ACTIVE_HIGH>;
 
 		avdd-supply = <&ts_avdd>;
 		vddio-supply = <&ts_vddio>;
@@ -146,7 +154,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
 
-		touchscreen-size-x = <1220>;
-		touchscreen-size-y = <2712>;
+		touchscreen-size-x = <19520>;
+		touchscreen-size-y = <43392>;
 	};
 };
