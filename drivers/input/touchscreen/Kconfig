@@ -370,20 +370,6 @@ config TOUCHSCREEN_EXC3000
 	  To compile this driver as a module, choose M here: the
 	  module will be called exc3000.
 
-config TOUCHSCREEN_FOCALTECH_3683G
-	tristate "FocalTech FT3683G SPI touchscreen"
-	depends on SPI
-	depends on OF || COMPILE_TEST
-	help
-	  Say Y here if you have a FocalTech FT3683G touchscreen
-	  controller connected over SPI, e.g. on the Redmi Note 13 Pro 5G
-	  (garnet).
-
-	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called focaltech_ft3683g.
-
 config TOUCHSCREEN_GOODIX
 	tristate "Goodix I2C touchscreen"
 	depends on I2C
@@ -1414,5 +1400,17 @@ config TOUCHSCREEN_HIMAX_HX83112B
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called himax_hx83112b.
+
+config TOUCHSCREEN_FOCALTECH_FT3683G
+	tristate "Focaltech FT3683G touchscreen driver"
+	depends on SPI
+	select CRC_CCITT
+	help
+	  Say Y here to enable support for FocalTech FT3683G touchscreens.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called focaltech_ft3683g.
 
 endif

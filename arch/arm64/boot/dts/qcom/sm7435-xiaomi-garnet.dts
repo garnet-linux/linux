@@ -123,6 +123,10 @@
 &spi9 {
 	status = "okay";
 
+	/* test: no GPI DMA (no SMMU stream described yet), FIFO mode only */
+	/delete-property/ dmas;
+	/delete-property/ dma-names;
+
 	pinctrl-names = "default";
 	pinctrl-0 = <&ts_spi_default>;
 
@@ -132,8 +136,7 @@
 	 * For a Goodix panel use compatible = "goodix,gt9916" with
 	 * touchscreen-size-x/y = <1220>/<2712> and IRQ_TYPE_LEVEL_LOW.
 	 *
-	 * The FocalTech controller reports 1/16 pixel units: 1220x2712 px
-	 * panel -> 19520x43392.
+	 * The in-tree series driver reports plain pixels: 1220x2712.
 	 *
 	 * Interrupt and reset polarity are the ones the vendor driver uses
 	 * (downstream: interrupts = <98 IRQ_TYPE_LEVEL_LOW>,
@@ -146,15 +149,15 @@
 
 		interrupt-parent = <&tlmm>;
 		interrupts = <98 IRQ_TYPE_LEVEL_LOW>;
-		reset-gpios = <&tlmm 96 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&tlmm 96 GPIO_ACTIVE_LOW>;
 
-		avdd-supply = <&ts_avdd>;
+		vci-supply = <&ts_avdd>;
 		vddio-supply = <&ts_vddio>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
 
-		touchscreen-size-x = <19520>;
-		touchscreen-size-y = <43392>;
+		touchscreen-size-x = <1220>;
+		touchscreen-size-y = <2712>;
 	};
 };
