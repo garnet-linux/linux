@@ -3,15 +3,18 @@
  * Qualcomm SM7435 (Snapdragon 7s Gen 2, "parrot") - STAGE 1 skeleton
  *
  * Only what is needed to boot to an initramfs via UEFI:
- * CPUs, PSCI, GICv3, arch timer, reserved memory, ramoops.
+ * CPUs, PSCI, GICv3, arch timer, reserved memory, ramoops,
+ * plus SCM/SMMU, GPI DMA/QUPv3, UFS, USB and SPMI/RPMh (the latter
+ * only so that board DTS files can describe PMIC regulators).
  * Values taken from the stock DTB (Mu-Silicium Resources/DTBs/garnet.dts).
  *
- * NOT here yet: clocks, pinctrl, RPMh, regulators, SMMU, UFS, USB, ...
+ * NOT here yet: display, interconnect, most clocks and pinctrl, ...
  */
 
 #include <dt-bindings/clock/qcom,gcc-sm7435.h>
 #include <dt-bindings/dma/qcom-gpi.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/soc/qcom,rpmh-rsc.h>
 
 / {
 	interrupt-parent = <&intc>;
@@ -295,6 +298,20 @@
 		};
 	};
 
+	/*
+	 * Secure Channel Manager.  arm-smmu-qcom refuses to finish probing
+	 * until qcom_scm_is_available() is true, so without this node the
+	 * apps SMMU stays in -EPROBE_DEFER forever and every master that
+	 * references it (GPI DMA, QUPv3, UFS, USB) defers as well.
+	 * Stock: firmware/qcom_scm, compatible "qcom,scm-v1.1", "qcom,scm".
+	 */
+	firmware {
+		scm: scm {
+			compatible = "qcom,scm-sm7435", "qcom,scm";
+			#reset-cells = <1>;
+		};
+	};
+
 	soc: soc@0 {
 		compatible = "simple-bus";
 		#address-cells = <2>;
@@ -312,6 +329,131 @@
 			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_LOW>;
 		};
 
+		/*
+		 * Applications SMMU (ARM MMU-500 with Qualcomm glue).
+		 *
+		 * The APPS SMMU is left enabled by the bootloader, so every bus
+		 * master that is not described here is subject to whatever
+		 * translation state the firmware programmed.  Linux must own the
+		 * SMMU so that the DMA masters it drives are mapped explicitly;
+		 * otherwise the first GPI DMA transaction (SPI9 / touchscreen)
+		 * takes an SMMU fault and the SoC resets into crashdump/EDL.
+		 *
+		 * 0x15000000..0x151fffff covers GR0/GR1, the context banks
+		 * (0x15100000+) and the TCU (0x151da000).
+		 *
+		 * NOTE: this kernel is built with
+		 * CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT=y, so streams that
+		 * are not described via "iommus" are blocked with a global fault
+		 * instead of being bypassed.  Every master that can do DMA must
+		 * therefore either be listed here (GPI DMA 0/1, QUPv3 1, UFS,
+		 * USB) or keep the "arm-smmu.disable_bypass=0" cmdline option.
+		 */
+		apps_smmu: iommu@15000000 {
+			compatible = "qcom,smmu-500", "arm,mmu-500";
+			reg = <0x0 0x15000000 0x0 0x200000>;
+			#global-interrupts = <1>;
+			#iommu-cells = <2>;
+			dma-coherent;
+			interrupts = 			     <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 96 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 670 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 671 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 97 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 101 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 102 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 104 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 106 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 107 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 113 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 114 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 115 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 116 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 117 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 118 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 181 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 182 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 183 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 184 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 185 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 186 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 187 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 188 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 189 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 190 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 191 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 192 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 315 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 316 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 317 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 318 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 319 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 320 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 321 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 322 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 323 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 324 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 325 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 326 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 327 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 328 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 329 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 331 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 332 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 333 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 334 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 335 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 336 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 337 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 338 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 339 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 340 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 341 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 342 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 343 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 344 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 395 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 396 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 398 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 399 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 400 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 401 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 402 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 403 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 404 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 405 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 406 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 407 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 408 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 409 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 412 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 418 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 419 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 706 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 423 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 424 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 425 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 689 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 690 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 691 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 692 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 693 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
 
 		/*
 		 * USB (stage 2a, EXPERIMENTAL): dwc3 + Qualcomm glue, relying on the
@@ -322,14 +464,15 @@
 		 */
 		usb: usb@a600000 {
 			compatible = "qcom,sm7435-dwc3", "qcom,snps-dwc3";
-			reg = <0x0 0x0a600000 0x0 0x100000>;
+			reg = <0x0 0x0a600000 0x0 0x100000>,
+			      <0x0 0x088e3000 0x0 0x11c>;	/* HS (femto) PHY, stock hsphy@88e3000 */
 			interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "dwc_usb3";
-			/*
-			 * Stock has dma-coherent, but that relies on the SMMU setup we do not
-			 * have yet: with it dwc3 read stale zero event buffers
-			 * ("unknown endpoint event 0"). Use explicit cache maintenance.
-			 */
+			/* stock qcom,param-override-seq: <value offset> pairs (X0, X1, X2) */
+			qcom,hsphy-param-override-seq = <0x67 0x6c 0xcb 0x70 0x14 0x74>;
+			/* stock: dwc3@a600000 iommus = <&apps_smmu 0x80 0> */
+			iommus = <&apps_smmu 0x80 0x0>;
+			dma-coherent;
 
 			/*
 			 * Qualcomm HS (femto) PHY is 16-bit UTMI+. GUSB2PHYCFG reads back
@@ -390,6 +533,68 @@
 		};
 
 		/*
+		 * SPMI bus (PMIC arbiter).  Same register layout as SM8550,
+		 * taken from the stock garnet DTB.  Needed for the PM6150L
+		 * PMIC GPIOs, which drive the touchscreen's 1.8 V iovdd rail.
+		 */
+		spmi_bus: spmi@c400000 {
+			compatible = "qcom,spmi-pmic-arb";
+			reg = <0x0 0x0c400000 0x0 0x3000>,
+			      <0x0 0x0c500000 0x0 0x400000>,
+			      <0x0 0x0c440000 0x0 0x80000>,
+			      <0x0 0x0c4c0000 0x0 0x20000>,
+			      <0x0 0x0c42d000 0x0 0x4000>;
+			reg-names = "core", "chnls", "obsrvr", "intr", "cnfg";
+			interrupt-names = "periph_irq";
+			interrupts-extended = <&pdc 1 IRQ_TYPE_LEVEL_HIGH>;
+			qcom,ee = <0>;
+			qcom,channel = <0>;
+			#address-cells = <2>;
+			#size-cells = <0>;
+			interrupt-controller;
+			#interrupt-cells = <4>;
+		};
+
+		/*
+		 * Wakeup interrupt controller in front of a few GIC SPIs
+		 * (SPMI peripheral IRQ, ...).  Values from the stock DTB.
+		 */
+		pdc: interrupt-controller@b220000 {
+			compatible = "qcom,pdc";
+			reg = <0x0 0x0b220000 0x0 0x30000>,
+			      <0x0 0x174000f0 0x0 0x64>;
+			reg-names = "pdc-interrupt-base", "apss-shared-spi-cfg";
+			qcom,pdc-ranges = <0 480 94>,
+					  <94 609 31>,
+					  <125 63 1>,
+					  <126 716 12>;
+			#interrupt-cells = <2>;
+			interrupt-parent = <&intc>;
+			interrupt-controller;
+		};
+
+		/*
+		 * RPMh (resource power manager, hardened).  Same layout as
+		 * SM8550; the regulators used by the board (PM6150L LDOs) are
+		 * described as children of this node in the board DTS.
+		 */
+		apps_rsc: rsc@17a00000 {
+			label = "apps_rsc";
+			compatible = "qcom,rpmh-rsc";
+			reg = <0x0 0x17a00000 0x0 0x10000>,
+			      <0x0 0x17a10000 0x0 0x10000>,
+			      <0x0 0x17a20000 0x0 0x10000>;
+			reg-names = "drv-0", "drv-1", "drv-2";
+			interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 5 IRQ_TYPE_LEVEL_HIGH>;
+			qcom,tcs-offset = <0xd00>;
+			qcom,drv-id = <2>;
+			qcom,tcs-config = <ACTIVE_TCS 3>, <SLEEP_TCS 2>,
+					  <WAKE_TCS 2>, <CONTROL_TCS 0>;
+		};
+
+		/*
 		 * GPI DMA for the QUPv3 serial engines.  The serial engines
 		 * have their FIFO interface disabled, so SPI/I2C/UART
 		 * transfers must use GPI DMA.
@@ -425,7 +630,8 @@
 			dma-channels = <12>;
 			dma-channel-mask = <0x3f>;
 			#dma-cells = <3>;
-			/* no SMMU node yet: relies on the bootloader's SMMU setup */
+			/* stock: gpi_dma0 iommus = <&apps_smmu 0x176 0> */
+			iommus = <&apps_smmu 0x176 0x0>;
 		};
 
 		gpi_dma1: dma-controller@a00000 {
@@ -447,7 +653,13 @@
 			/* GPII 0 is statically assigned on this SoC */
 			dma-channel-mask = <0x3e>;
 			#dma-cells = <3>;
-			/* no SMMU node yet: relies on the bootloader's SMMU setup */
+			/*
+			 * Stream IDs from the stock device tree.  Without these
+			 * the GPI engine DMA's with untranslated physical
+			 * addresses while the SMMU is configured for this
+			 * master, which aborts the transfer and resets the SoC.
+			 */
+			iommus = <&apps_smmu 0x416 0x0>;
 		};
 
 		/* QUPv3 wrapper 1 (serial engines 6..11 in downstream naming) */
@@ -459,6 +671,8 @@
 			clock-names = "m-ahb", "s-ahb";
 			#address-cells = <2>;
 			#size-cells = <2>;
+			/* stock: qupv3_1_geni_se iommus = <&apps_smmu 0x403 0x0> */
+			iommus = <&apps_smmu 0x403 0x0>;
 			ranges;
 			status = "disabled";
 
@@ -534,9 +748,13 @@
 			ref-clk-freq = <19200000>;
 
 			/*
-			 * No SMMU is set up yet, so keep the accesses coherent
-			 * instead of relying on an IOMMU.
+			 * Stream ID from the stock device tree.  This kernel is
+			 * built with CONFIG_ARM_SMMU_DISABLE_BYPASS_BY_DEFAULT,
+			 * so an unlisted master would be blocked with a global
+			 * fault instead of being bypassed: every active DMA
+			 * master must be attached.
 			 */
+			iommus = <&apps_smmu 0x20 0x0>;
 			dma-coherent;
 
 			status = "disabled";

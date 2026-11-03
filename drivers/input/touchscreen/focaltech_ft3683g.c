@@ -7,7 +7,6 @@
  */
 
 #include <linux/cache.h>
-#include <linux/crc-ccitt.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
@@ -26,7 +25,7 @@
 
 #define FT3683G_SPI_CMD_READ	0xa0
 #define FT3683G_SPI_DUMMY	3
-#define FT3683G_SPI_RETRIES	3
+#define FT3683G_SPI_RETRIES	20
 #define FT3683G_SPI_CS_DELAY_US	150
 
 #define FT3683G_REG_CHIP_ID	0xa3
@@ -67,6 +66,26 @@ struct ft3683g_data {
 	u8 rx_buf[256] ____cacheline_aligned;
 };
 
+/*
+ * Reflected CRC-16 (poly 0x8408, init 0xffff), as used by the FocalTech
+ * SPI v2 protocol.  This is NOT the same thing as crc_ccitt(), which is
+ * the non-reflected CCITT-FALSE variant.
+ */
+static u16 ft3683g_crc(const u8 *data, u32 len)
+{
+	u16 crc = 0xffff;
+	u32 i;
+	int bit;
+
+	for (i = 0; i < len; i++) {
+		crc ^= data[i];
+		for (bit = 0; bit < 8; bit++)
+			crc = (crc & 0x01) ? (crc >> 1) ^ 0x8408 : crc >> 1;
+	}
+
+	return crc;
+}
+
 static int ft3683g_spi_read(struct ft3683g_data *ts, u8 addr,
 			    u8 *data, u32 len)
 {
@@ -90,23 +109,32 @@ static int ft3683g_spi_read(struct ft3683g_data *ts, u8 addr,
 
 	for (i = 0; i < FT3683G_SPI_RETRIES; i++) {
 		error = spi_sync_transfer(ts->spi, &xfer, 1);
-		if (error)
+		if (error) {
+			dev_dbg(ts->dev, "read %02x: spi transfer failed: %d\n",
+				addr, error);
 			continue;
+		}
 
 		if (ts->rx_buf[3] & 0xa0) {
 			fsleep(FT3683G_SPI_CS_DELAY_US);
 			continue;
 		}
 
-		crc_calc = crc_ccitt(0xffff, &ts->rx_buf[dp], len);
+		crc_calc = ft3683g_crc(&ts->rx_buf[dp], len);
 		crc_read = ts->rx_buf[dp + len] |
 			   (ts->rx_buf[dp + len + 1] << 8);
 		if (crc_calc != crc_read) {
+			dev_dbg(ts->dev,
+				"read %02x: crc %04x != %04x, rx[0..7]=%*phN\n",
+				addr, crc_calc, crc_read, min_t(u32, txlen, 8),
+				ts->rx_buf);
 			fsleep(FT3683G_SPI_CS_DELAY_US);
 			continue;
 		}
 
 		memcpy(data, &ts->rx_buf[dp], len);
+		/* the chip needs CS high for a while before the next command */
+		fsleep(FT3683G_SPI_CS_DELAY_US);
 		return 0;
 	}
 
@@ -120,26 +148,34 @@ static int ft3683g_read_reg(struct ft3683g_data *ts, u8 addr, u8 *val)
 
 static int ft3683g_check_chip_id(struct ft3683g_data *ts)
 {
-	u8 idh, idl;
-	int error;
+	u8 idh = 0xff, idl = 0xff;
+	int error = -EIO;
+	int i;
 
-	error = ft3683g_read_reg(ts, FT3683G_REG_CHIP_ID, &idh);
-	if (error)
-		return error;
+	/*
+	 * The controller needs some time after reset before it answers.
+	 * Keep polling for about a second, like the vendor driver's
+	 * fts_wait_tp_to_valid() does, instead of probing once and failing.
+	 */
+	for (i = 0; i < 10; i++) {
+		error = ft3683g_read_reg(ts, FT3683G_REG_CHIP_ID, &idh);
+		if (!error)
+			error = ft3683g_read_reg(ts, FT3683G_REG_CHIP_ID2, &idl);
 
-	error = ft3683g_read_reg(ts, FT3683G_REG_CHIP_ID2, &idl);
-	if (error)
-		return error;
+		if (!error && idh == FT3683G_CHIP_IDH &&
+		    idl == FT3683G_CHIP_IDL) {
+			dev_info(ts->dev, "chip ID: %02x%02x\n", idh, idl);
+			return 0;
+		}
 
-	if (idh != FT3683G_CHIP_IDH || idl != FT3683G_CHIP_IDL) {
-		dev_err(ts->dev,
-			"chip ID mismatch: expected %02x%02x, got %02x%02x\n",
-			FT3683G_CHIP_IDH, FT3683G_CHIP_IDL, idh, idl);
-		return -ENODEV;
+		msleep(100);
 	}
 
-	dev_dbg(ts->dev, "chip ID: %02x%02x\n", idh, idl);
-	return 0;
+	dev_err(ts->dev,
+		"touch controller not ready: expected %02x%02x, got %02x%02x, last error %d\n",
+		FT3683G_CHIP_IDH, FT3683G_CHIP_IDL, idh, idl, error);
+
+	return error ? error : -ENODEV;
 }
 
 static irqreturn_t ft3683g_irq(int irq, void *dev_id)

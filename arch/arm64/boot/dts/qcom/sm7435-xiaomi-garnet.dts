@@ -12,8 +12,11 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 
 #include "sm7435.dtsi"
+#include "pm6150l.dtsi"
 
 / {
 	model = "Xiaomi Redmi Note 13 Pro 5G";
@@ -24,28 +27,53 @@
 	};
 
 	/*
-	 * Touchscreen rails. Downstream: iovdd is a fixed regulator enabled by
-	 * pm6150l GPIO3 (1.8 V) and avdd is PMIC LDO L9E (3.224 V). There is
-	 * no SPMI/RPMh support in this tree yet, so these are placeholders that
-	 * rely on the bootloader having left the rails on. Replace them with
-	 * the real regulators once the PMICs are described.
+	 * Touchscreen iovdd.  Downstream this is a fixed 1.8 V regulator
+	 * switched by PM6150L GPIO3 (enable-active-high, boot-on).  The
+	 * PMIC is only reachable through SPMI, which is described in
+	 * sm7435.dtsi; without it this rail is never actually enabled and
+	 * the FT3683G stays silent (MISO idle high, every read 0xffff).
 	 */
 	ts_vddio: regulator-ts-vddio {
 		compatible = "regulator-fixed";
 		regulator-name = "ts_vddio";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
-		regulator-always-on;
+		gpios = <&pm6150l_gpios 3 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
 		regulator-boot-on;
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_vddio_default>;
 	};
+};
 
-	ts_avdd: regulator-ts-avdd {
-		compatible = "regulator-fixed";
-		regulator-name = "ts_avdd";
-		regulator-min-microvolt = <3224000>;
-		regulator-max-microvolt = <3224000>;
-		regulator-always-on;
-		regulator-boot-on;
+&pm6150l_gpios {
+	/* PM6150L VIN1 is the 1.8 V rail on this board */
+	ts_vddio_default: ts-vddio-default-state {
+		pins = "gpio3";
+		function = "normal";
+		power-source = <0>;
+		bias-disable;
+		qcom,drive-strength = <PMIC_GPIO_STRENGTH_LOW>;
+	};
+};
+
+/*
+ * The touchscreen avdd is PM6150L LDO9 ("ldoe9" in the stock DTB), fixed
+ * at 3.224 V.  This is an RPMh-controlled regulator, hence the node sits
+ * below the apps RSC.  L9 also feeds the SD card slot, so keep the same
+ * voltage the stock firmware uses.
+ */
+&apps_rsc {
+	regulators-1 {
+		compatible = "qcom,pm6150l-rpmh-regulators";
+		qcom,pmic-id = "e";
+
+		pm6150l_l9: ldo9 {
+			regulator-min-microvolt = <3224000>;
+			regulator-max-microvolt = <3224000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-boot-on;
+		};
 	};
 };
 
@@ -100,6 +128,13 @@
 		};
 	};
 
+	ts_spi_sleep: ts-spi-sleep-state {
+		pins = "gpio10", "gpio11", "gpio12", "gpio13";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
 	/* the GPIOs are requested by the touchscreen driver */
 	ts_int_default: ts-int-default-state {
 		pins = "gpio98";
@@ -114,6 +149,20 @@
 		drive-strength = <8>;
 		bias-pull-up;
 	};
+
+	ts_int_sleep: ts-int-sleep-state {
+		pins = "gpio98";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	ts_reset_sleep: ts-reset-sleep-state {
+		pins = "gpio96";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
 };
 
 &qupv3_1 {
@@ -123,24 +172,28 @@
 &spi9 {
 	status = "okay";
 
-	/* test: no GPI DMA (no SMMU stream described yet), FIFO mode only */
-	/delete-property/ dmas;
-	/delete-property/ dma-names;
+	/*
+	 * The serial engine has its FIFO interface fused off ("FIFO mode
+	 * disabled" in dmesg), so FIFO mode can never work: transfers have to
+	 * go through GPI DMA (dmas/dma-names come from sm7435.dtsi).
+	 */
 
-	pinctrl-names = "default";
+	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&ts_spi_default>;
+	pinctrl-1 = <&ts_spi_sleep>;
 
 	/*
 	 * FocalTech FT3683G on the same bus/pins as the Goodix GT9916S that
 	 * other garnet panels use (downstream lists both under one node).
-	 * For a Goodix panel use compatible = "goodix,gt9916" with
-	 * touchscreen-size-x/y = <1220>/<2712> and IRQ_TYPE_LEVEL_LOW.
 	 *
 	 * The in-tree series driver reports plain pixels: 1220x2712.
 	 *
 	 * Interrupt and reset polarity are the ones the vendor driver uses
 	 * (downstream: interrupts = <98 IRQ_TYPE_LEVEL_LOW>,
 	 * focaltech,reset-gpio = <&tlmm 96 0x00>).
+	 *
+	 * "vci" is downstream's avdd (PM6150L L9E, 3.224 V); "vddio" is the
+	 * 1.8 V rail switched by PM6150L GPIO3.
 	 */
 	touchscreen@0 {
 		compatible = "focaltech,ft3683g";
@@ -151,11 +204,12 @@
 		interrupts = <98 IRQ_TYPE_LEVEL_LOW>;
 		reset-gpios = <&tlmm 96 GPIO_ACTIVE_LOW>;
 
-		vci-supply = <&ts_avdd>;
+		vci-supply = <&pm6150l_l9>;
 		vddio-supply = <&ts_vddio>;
 
-		pinctrl-names = "default";
+		pinctrl-names = "default", "sleep";
 		pinctrl-0 = <&ts_int_default>, <&ts_reset_default>;
+		pinctrl-1 = <&ts_int_sleep>, <&ts_reset_sleep>;
 
 		touchscreen-size-x = <1220>;
 		touchscreen-size-y = <2712>;
