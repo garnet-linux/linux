@@ -17,6 +17,7 @@
 #include <linux/regulator/consumer.h>
 
 #include <drm/display/drm_dsc.h>
+#include <drm/display/drm_dsc_helper.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
@@ -59,10 +60,11 @@ static void nt37706_reset(struct nt37706_panel *ctx)
 	usleep_range(11000, 12000);
 }
 
-static void nt37706_on(struct nt37706_panel *ctx)
+static int nt37706_on(struct nt37706_panel *ctx)
 {
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
+	struct drm_dsc_picture_parameter_set pps;
 
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
@@ -311,7 +313,19 @@ static void nt37706_on(struct nt37706_panel *ctx)
 				     0x00, 0x00, 0x00);
 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xe6, 0x00);
 
+	/*
+	 * The vendor DSI stack sends the DSC PPS and compression-mode command
+	 * only after the whole panel-on sequence has been transmitted; sending
+	 * them earlier leaves the panel without a valid DSC configuration.
+	 */
+	drm_dsc_pps_payload_pack(&pps, &ctx->dsc);
+	mipi_dsi_picture_parameter_set_multi(&dsi_ctx, &pps);
+	mipi_dsi_compression_mode_multi(&dsi_ctx, true);
+	mipi_dsi_msleep(&dsi_ctx, 28);
+
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+
+	return dsi_ctx.accum_err;
 }
 
 static int nt37706_off(struct nt37706_panel *ctx)
@@ -343,7 +357,21 @@ static int nt37706_prepare(struct drm_panel *panel)
 	usleep_range(10000, 11000);
 
 	nt37706_reset(ctx);
-	nt37706_on(ctx);
+
+	ret = nt37706_on(ctx);
+	if (ret < 0) {
+		dev_err(&ctx->dsi->dev, "Failed to initialize panel: %d\n", ret);
+		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
+		regulator_bulk_disable(ARRAY_SIZE(ctx->supplies), ctx->supplies);
+		return ret;
+	}
+
+	dev_info(&ctx->dsi->dev,
+		 "panel on: %dx%d, DSC %dx%d, %d slices, %d bpc, %d bpp\n",
+		 ctx->dsc.pic_width, ctx->dsc.pic_height,
+		 ctx->dsc.slice_width, ctx->dsc.slice_height,
+		 ctx->dsc.slice_count, ctx->dsc.bits_per_component,
+		 ctx->dsc.bits_per_pixel >> 4);
 
 	return 0;
 }
@@ -440,6 +468,7 @@ static int nt37706_probe(struct mipi_dsi_device *dsi)
 	if (IS_ERR(ctx))
 		return PTR_ERR(ctx);
 
+	memcpy(ctx->supplies, nt37706_supplies, sizeof(nt37706_supplies));
 	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(nt37706_supplies),
 				      ctx->supplies);
 	if (ret)
@@ -454,9 +483,9 @@ static int nt37706_probe(struct mipi_dsi_device *dsi)
 	mipi_dsi_set_drvdata(dsi, ctx);
 
 	dsi->lanes = 4;
-	dsi->format = MIPI_DSI_FMT_RGB888;
+	dsi->format = MIPI_DSI_FMT_RGB101010;
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-			  MIPI_DSI_MODE_LPM;
+			  MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_DSC_ALL_SLICES_IN_PKT;
 
 	/* This panel only supports DSC; unconditionally enable it. */
 	ctx->dsc.dsc_version_major = 1;

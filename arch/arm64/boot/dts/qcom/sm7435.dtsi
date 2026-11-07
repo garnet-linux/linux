@@ -161,7 +161,6 @@
 			no-map;
 		};
 
-		/* TODO stage 2: add compatible = "qcom,smem" + hwlocks once TCSR mutex exists */
 		smem_mem: smem@80900000 {
 			reg = <0x0 0x80900000 0x0 0x200000>;
 			no-map;
@@ -311,6 +310,12 @@
 			compatible = "qcom,scm-sm7435", "qcom,scm";
 			#reset-cells = <1>;
 		};
+	};
+
+	smem: qcom,smem {
+		compatible = "qcom,smem";
+		memory-region = <&smem_mem>;
+		hwlocks = <&tcsr_mutex 3>;
 	};
 
 	soc: soc@0 {
@@ -503,6 +508,12 @@
 		 * The register offsets are taken from the downstream
 		 * "qcom,parrot-gcc" driver.
 		 */
+		tcsr_mutex: hwlock@1f40000 {
+			compatible = "qcom,tcsr-mutex";
+			reg = <0x0 0x01f40000 0x0 0x40000>;
+			#hwlock-cells = <1>;
+		};
+
 		gcc: clock-controller@100000 {
 			compatible = "qcom,gcc-sm7435";
 			reg = <0x0 0x100000 0x0 0x1f4200>;
