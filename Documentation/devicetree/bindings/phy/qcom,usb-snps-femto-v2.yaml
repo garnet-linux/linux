@@ -62,6 +62,16 @@ properties:
   vdda33-supply:
     description: phandle to the regulator 3.3V supply node.
 
+  qcom,param-override-seq:
+    description:
+      Raw tuning overrides as <value offset> pairs, written to the PHY
+      register at the given offset (same format as the downstream driver).
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 2
+    maxItems: 8
+    items:
+      maximum: 0xff
+
   qcom,hs-disconnect-bp:
     description:
       This adjusts the voltage level for the threshold used to

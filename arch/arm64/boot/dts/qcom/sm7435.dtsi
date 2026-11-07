@@ -12,8 +12,11 @@
  */
 
 #include <dt-bindings/clock/qcom,gcc-sm7435.h>
+#include <dt-bindings/clock/qcom,rpmh.h>
 #include <dt-bindings/dma/qcom-gpi.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/mailbox/qcom-ipcc.h>
+#include <dt-bindings/power/qcom,rpmhpd.h>
 #include <dt-bindings/soc/qcom,rpmh-rsc.h>
 
 / {
@@ -160,7 +163,6 @@
 			no-map;
 		};
 
-		/* TODO stage 2: add compatible = "qcom,smem" + hwlocks once TCSR mutex exists */
 		smem_mem: smem@80900000 {
 			reg = <0x0 0x80900000 0x0 0x200000>;
 			no-map;
@@ -309,6 +311,47 @@
 		scm: scm {
 			compatible = "qcom,scm-sm7435", "qcom,scm";
 			#reset-cells = <1>;
+		};
+	};
+
+	smem {
+		compatible = "qcom,smem";
+		memory-region = <&smem_mem>;
+		hwlocks = <&tcsr_mutex 3>;
+	};
+
+	smp2p-wpss {
+		compatible = "qcom,smp2p";
+		qcom,smem = <617>, <616>;
+		interrupts-extended = <&ipcc IPCC_CLIENT_WPSS
+					     IPCC_MPROC_SIGNAL_SMP2P
+					     IRQ_TYPE_EDGE_RISING>;
+		mboxes = <&ipcc IPCC_CLIENT_WPSS IPCC_MPROC_SIGNAL_SMP2P>;
+
+		qcom,local-pid = <0>;
+		qcom,remote-pid = <13>;
+
+		smp2p_wpss_out: master-kernel {
+			qcom,entry-name = "master-kernel";
+			#qcom,smem-state-cells = <1>;
+		};
+
+		smp2p_wpss_in: slave-kernel {
+			qcom,entry-name = "slave-kernel";
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+
+		/* WLAN handshake with the WPSS-hosted WiFi firmware */
+		smp2p_wlan_out: wlan-ap-to-wpss {
+			qcom,entry-name = "wlan";
+			#qcom,smem-state-cells = <1>;
+		};
+
+		smp2p_wlan_in: wlan-wpss-to-ap {
+			qcom,entry-name = "wlan";
+			interrupt-controller;
+			#interrupt-cells = <2>;
 		};
 	};
 
@@ -462,24 +505,44 @@
 		 * drivers exist for this SoC yet, so none are referenced here.
 		 * Stock node: ssusb@a600000 (core 0xa600000, qscratch = +0xf8800).
 		 */
+		/*
+		 * HS (femto) PHY, stock hsphy@88e3000.  The supplies (stock:
+		 * vdd 0.88 V, vdda18, vdda33) are not described yet: the rails
+		 * stay as the bootloader left them.
+		 */
+		usb_hsphy: phy@88e3000 {
+			compatible = "qcom,sm6375-usb-hs-phy",
+				     "qcom,usb-snps-hs-7nm-phy";
+			reg = <0x0 0x088e3000 0x0 0x11c>;
+
+			clocks = <&gcc GCC_EUSB3_0_CLKREF_EN>;
+			clock-names = "ref";
+			resets = <&gcc GCC_QUSB2PHY_PRIM_BCR>;
+
+			/* stock qcom,param-override-seq: <value offset> pairs */
+			qcom,param-override-seq = <0x67 0x6c 0xcb 0x70 0x14 0x74>;
+
+			#phy-cells = <0>;
+		};
+
 		usb: usb@a600000 {
 			compatible = "qcom,sm7435-dwc3", "qcom,snps-dwc3";
-			reg = <0x0 0x0a600000 0x0 0x100000>,
-			      <0x0 0x088e3000 0x0 0x11c>;	/* HS (femto) PHY, stock hsphy@88e3000 */
+			reg = <0x0 0x0a600000 0x0 0x100000>;
 			interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "dwc_usb3";
-			/* stock qcom,param-override-seq: <value offset> pairs (X0, X1, X2) */
-			qcom,hsphy-param-override-seq = <0x67 0x6c 0xcb 0x70 0x14 0x74>;
+			phys = <&usb_hsphy>;
+			phy-names = "usb2-phy";
 			/* stock: dwc3@a600000 iommus = <&apps_smmu 0x80 0> */
 			iommus = <&apps_smmu 0x80 0x0>;
 			dma-coherent;
 
 			/*
-			 * Qualcomm HS (femto) PHY is 16-bit UTMI+. GUSB2PHYCFG reads back
-			 * PHYIF=0 (8-bit), USBTRDTIM=9: width/turnaround mismatch stalls
-			 * ep0 DEPCFG. Force 16-bit (PHYIF=1, USBTRDTIM=5).
+			 * No phy_type: leave GUSB2PHYCFG.PHYIF/USBTRDTIM at the
+			 * hardware default like every other Qualcomm femto-PHY
+			 * platform.  Forcing "utmi_wide" is a width mismatch if
+			 * the PHY runs 8-bit UTMI+ (reset/chirp still work, data
+			 * does not -> -71 on the host).
 			 */
-			phy_type = "utmi_wide";
 			snps,has-lpm-erratum;
 			snps,hird-threshold = /bits/ 8 <0x0>;
 			snps,is-utmi-l1-suspend;
@@ -573,6 +636,84 @@
 			interrupt-controller;
 		};
 
+		tcsr_mutex: hwlock@1f40000 {
+			compatible = "qcom,tcsr-mutex";
+			reg = <0x0 0x01f40000 0x0 0x20000>;
+			#hwlock-cells = <1>;
+		};
+
+		/* stock: qcom,ipcc@ed18000 */
+		ipcc: mailbox@ed18000 {
+			compatible = "qcom,sm8550-ipcc", "qcom,ipcc";
+			reg = <0x0 0x0ed18000 0x0 0x1000>;
+			interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			#mbox-cells = <2>;
+		};
+
+		aoss_qmp: power-management@c300000 {
+			compatible = "qcom,sm8550-aoss-qmp", "qcom,aoss-qmp";
+			reg = <0x0 0x0c300000 0x0 0x400>;
+			interrupt-parent = <&ipcc>;
+			interrupts-extended = <&ipcc IPCC_CLIENT_AOP
+						     IPCC_MPROC_SIGNAL_GLINK_QMP
+						     IRQ_TYPE_EDGE_RISING>;
+			mboxes = <&ipcc IPCC_CLIENT_AOP IPCC_MPROC_SIGNAL_GLINK_QMP>;
+			#clock-cells = <0>;
+		};
+
+		/*
+		 * WPSS (Wi-Fi processing subsystem): runs the WiFi firmware.
+		 * Stock node: remoteproc-wpss@8a00000, qcom,parrot-wpss-pas.
+		 * The PAS data of milos/sc7280 (pas_id 6) is reused.
+		 */
+		remoteproc_wpss: remoteproc@8a00000 {
+			compatible = "qcom,milos-wpss-pas";
+			reg = <0x0 0x08a00000 0x0 0x10000>;
+
+			interrupts-extended = <&intc GIC_SPI 587 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_wpss_in 0 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_wpss_in 1 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_wpss_in 2 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_wpss_in 3 IRQ_TYPE_EDGE_RISING>,
+					      <&smp2p_wpss_in 7 IRQ_TYPE_EDGE_RISING>;
+			interrupt-names = "wdog",
+					  "fatal",
+					  "ready",
+					  "handover",
+					  "stop-ack",
+					  "shutdown-ack";
+
+			clocks = <&rpmhcc RPMH_CXO_CLK>;
+			clock-names = "xo";
+
+			power-domains = <&rpmhpd RPMHPD_CX>,
+					<&rpmhpd RPMHPD_MX>;
+			power-domain-names = "cx",
+					     "mx";
+
+			memory-region = <&wpss_mem>;
+
+			qcom,qmp = <&aoss_qmp>;
+
+			qcom,smem-states = <&smp2p_wpss_out 0>;
+			qcom,smem-state-names = "stop";
+
+			status = "disabled";
+
+			glink-edge {
+				interrupts-extended = <&ipcc IPCC_CLIENT_WPSS
+							     IPCC_MPROC_SIGNAL_GLINK_QMP
+							     IRQ_TYPE_EDGE_RISING>;
+				mboxes = <&ipcc IPCC_CLIENT_WPSS
+						IPCC_MPROC_SIGNAL_GLINK_QMP>;
+
+				label = "wpss";
+				qcom,remote-pid = <13>;
+			};
+		};
+
 		/*
 		 * RPMh (resource power manager, hardened).  Same layout as
 		 * SM8550; the regulators used by the board (PM6150L LDOs) are
@@ -592,6 +733,59 @@
 			qcom,drv-id = <2>;
 			qcom,tcs-config = <ACTIVE_TCS 3>, <SLEEP_TCS 2>,
 					  <WAKE_TCS 2>, <CONTROL_TCS 0>;
+
+			rpmhcc: clock-controller {
+				compatible = "qcom,milos-rpmh-clk";
+				clocks = <&bi_tcxo>;
+				clock-names = "xo";
+				#clock-cells = <1>;
+			};
+
+			rpmhpd: power-controller {
+				compatible = "qcom,milos-rpmhpd";
+				#power-domain-cells = <1>;
+				operating-points-v2 = <&rpmhpd_opp_table>;
+
+				rpmhpd_opp_table: opp-table {
+					compatible = "operating-points-v2";
+
+					rpmhpd_opp_ret: opp-16 {
+						opp-level = <RPMH_REGULATOR_LEVEL_RETENTION>;
+					};
+
+					rpmhpd_opp_low_svs_d1: opp-56 {
+						opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS_D1>;
+					};
+
+					rpmhpd_opp_low_svs: opp-64 {
+						opp-level = <RPMH_REGULATOR_LEVEL_LOW_SVS>;
+					};
+
+					rpmhpd_opp_svs: opp-128 {
+						opp-level = <RPMH_REGULATOR_LEVEL_SVS>;
+					};
+
+					rpmhpd_opp_svs_l1: opp-192 {
+						opp-level = <RPMH_REGULATOR_LEVEL_SVS_L1>;
+					};
+
+					rpmhpd_opp_nom: opp-256 {
+						opp-level = <RPMH_REGULATOR_LEVEL_NOM>;
+					};
+
+					rpmhpd_opp_nom_l1: opp-320 {
+						opp-level = <RPMH_REGULATOR_LEVEL_NOM_L1>;
+					};
+
+					rpmhpd_opp_turbo: opp-384 {
+						opp-level = <RPMH_REGULATOR_LEVEL_TURBO>;
+					};
+
+					rpmhpd_opp_turbo_l1: opp-416 {
+						opp-level = <RPMH_REGULATOR_LEVEL_TURBO_L1>;
+					};
+				};
+			};
 		};
 
 		/*

@@ -58,9 +58,11 @@
 #define GCC_QUPV3_WRAP1_S3_CLK_SRC		20
 #define GCC_QUPV3_WRAP_1_M_AHB_CLK		21
 #define GCC_QUPV3_WRAP_1_S_AHB_CLK		22
+#define GCC_EUSB3_0_CLKREF_EN			23
 
 /* GCC resets */
 #define GCC_UFS_PHY_BCR				0
+#define GCC_QUSB2PHY_PRIM_BCR			1
 
 /* GCC power domains */
 #define UFS_PHY_GDSC				0

@@ -74,6 +74,44 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 			regulator-boot-on;
 		};
+
+		/* WiFi/BT: 1.8 V XO and the two 3.3 V PA/channel rails */
+		pm6150l_l1: ldo1 {
+			regulator-min-microvolt = <1620000>;
+			regulator-max-microvolt = <1980000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		pm6150l_l10: ldo10 {
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3400000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		pm6150l_l11: ldo11 {
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3400000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	regulators-0 {
+		compatible = "qcom,pm6450-rpmh-regulators";
+		qcom,pmic-id = "b";
+
+		/* WiFi CX/MX */
+		pm6450_l11: ldo11 {
+			regulator-min-microvolt = <348000>;
+			regulator-max-microvolt = <888000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* WiFi 1.3 V RFA */
+		pm6450_l14: ldo14 {
+			regulator-min-microvolt = <1150000>;
+			regulator-max-microvolt = <1304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
 	};
 };
 
@@ -87,6 +125,16 @@
 
 &ufs_mem_phy {
 	status = "ok";
+};
+
+/*
+ * WPSS runs the WiFi firmware.  Put the split firmware (wpss.mdt +
+ * wpss.bNN) from the vendor partition in
+ * /lib/firmware/qcom/sm7435/garnet/.
+ */
+&remoteproc_wpss {
+	firmware-name = "qcom/sm7435/garnet/wpss.mdt";
+	status = "okay";
 };
 
 &usb {

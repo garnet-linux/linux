@@ -36,6 +36,7 @@ description: |
     PMIC. Supported regulator node names are
       For PM6150, smps1 - smps5, ldo1 - ldo19
       For PM6150L, smps1 - smps8, ldo1 - ldo11, bob
+      For PM6450, ldo1 - ldo28
       For PM6350, smps1 - smps5, ldo1 - ldo22
       For PM660, smps1 - smps6, ldo1 - ldo3, ldo5 - ldo19
       For PM660L, smps1 - smps3, smps5, ldo1 - ldo8, bob
@@ -72,6 +73,7 @@ properties:
       - qcom,pm6150-rpmh-regulators
       - qcom,pm6150l-rpmh-regulators
       - qcom,pm6350-rpmh-regulators
+      - qcom,pm6450-rpmh-regulators
       - qcom,pm660-rpmh-regulators
       - qcom,pm660l-rpmh-regulators
       - qcom,pm7325-rpmh-regulators
@@ -186,6 +188,15 @@ allOf:
         vdd-l9-l10-supply: true
       patternProperties:
         "^vdd-s[1-8]-supply$": true
+
+  - if:
+      properties:
+        compatible:
+          enum:
+            - qcom,pm6450-rpmh-regulators
+    then:
+      patternProperties:
+        "^vdd-l([1-9]|1[0-9]|2[0-8])-supply$": true
 
   - if:
       properties:

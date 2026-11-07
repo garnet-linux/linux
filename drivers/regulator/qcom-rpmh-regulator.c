@@ -1564,6 +1564,38 @@ static const struct rpmh_vreg_init_data pm6150_vreg_data[] = {
 	{}
 };
 
+static const struct rpmh_vreg_init_data pm6450_vreg_data[] = {
+	RPMH_VREG("ldo1",  LDO, 1, &pmic5_nldo, "vdd-l1"),
+	RPMH_VREG("ldo2",  LDO, 2, &pmic5_nldo, "vdd-l2"),
+	RPMH_VREG("ldo3",  LDO, 3, &pmic5_nldo, "vdd-l3"),
+	RPMH_VREG("ldo4",  LDO, 4, &pmic5_nldo, "vdd-l4"),
+	RPMH_VREG("ldo5",  LDO, 5, &pmic5_nldo, "vdd-l5"),
+	RPMH_VREG("ldo6",  LDO, 6, &pmic5_nldo, "vdd-l6"),
+	RPMH_VREG("ldo7",  LDO, 7, &pmic5_nldo, "vdd-l7"),
+	RPMH_VREG("ldo8",  LDO, 8, &pmic5_nldo, "vdd-l8"),
+	RPMH_VREG("ldo9",  LDO, 9, &pmic5_nldo, "vdd-l9"),
+	RPMH_VREG("ldo10",  LDO, 10, &pmic5_nldo, "vdd-l10"),
+	RPMH_VREG("ldo11",  LDO, 11, &pmic5_nldo, "vdd-l11"),
+	RPMH_VREG("ldo12",  LDO, 12, &pmic5_nldo, "vdd-l12"),
+	RPMH_VREG("ldo13",  LDO, 13, &pmic5_nldo, "vdd-l13"),
+	RPMH_VREG("ldo14",  LDO, 14, &pmic5_nldo, "vdd-l14"),
+	RPMH_VREG("ldo15",  LDO, 15, &pmic5_nldo, "vdd-l15"),
+	RPMH_VREG("ldo16",  LDO, 16, &pmic5_nldo, "vdd-l16"),
+	RPMH_VREG("ldo17",  LDO, 17, &pmic5_nldo, "vdd-l17"),
+	RPMH_VREG("ldo18", LDO, 18, &pmic5_pldo, "vdd-l18"),
+	RPMH_VREG("ldo19", LDO, 19, &pmic5_pldo, "vdd-l19"),
+	RPMH_VREG("ldo20", LDO, 20, &pmic5_pldo, "vdd-l20"),
+	RPMH_VREG("ldo21", LDO, 21, &pmic5_pldo, "vdd-l21"),
+	RPMH_VREG("ldo22", LDO, 22, &pmic5_pldo, "vdd-l22"),
+	RPMH_VREG("ldo23", LDO, 23, &pmic5_pldo, "vdd-l23"),
+	RPMH_VREG("ldo24", LDO, 24, &pmic5_pldo, "vdd-l24"),
+	RPMH_VREG("ldo25", LDO, 25, &pmic5_pldo, "vdd-l25"),
+	RPMH_VREG("ldo26", LDO, 26, &pmic5_pldo, "vdd-l26"),
+	RPMH_VREG("ldo27", LDO, 27, &pmic5_pldo, "vdd-l27"),
+	RPMH_VREG("ldo28", LDO, 28, &pmic5_pldo, "vdd-l28"),
+	{}
+};
+
 static const struct rpmh_vreg_init_data pm6150l_vreg_data[] = {
 	RPMH_VREG("smps1",  SMPS, 1, &pmic5_ftsmps510, "vdd-s1"),
 	RPMH_VREG("smps2",  SMPS, 2, &pmic5_ftsmps510, "vdd-s2"),
@@ -2047,6 +2079,10 @@ static const struct of_device_id __maybe_unused rpmh_regulator_match_table[] = {
 	{
 		.compatible = "qcom,pm6150l-rpmh-regulators",
 		.data = pm6150l_vreg_data,
+	},
+	{
+		.compatible = "qcom,pm6450-rpmh-regulators",
+		.data = pm6450_vreg_data,
 	},
 	{
 		.compatible = "qcom,pm6350-rpmh-regulators",

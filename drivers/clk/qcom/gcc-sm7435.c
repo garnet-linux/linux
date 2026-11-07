@@ -11,6 +11,7 @@
  *   - the UFS PHY AXI/AHB/UNIPRO/ICE/AUX clock roots and their branches
  *   - the UFS PHY symbol clock multiplexers
  *   - GCC_UFS_0_CLKREF_EN
+ *   - GCC_EUSB3_0_CLKREF_EN and GCC_QUSB2PHY_PRIM_BCR (USB HS PHY ref clk/reset)
  *   - the UFS PHY global domain power controller (UFS_PHY_GDSC)
  *   - the UFS PHY block reset (GCC_UFS_PHY_BCR)
  *
@@ -287,6 +288,19 @@ static struct clk_branch gcc_aggre_ufs_phy_axi_clk = {
 	},
 };
 
+static struct clk_branch gcc_eusb3_0_clkref_en = {
+	.halt_reg = 0x9c00c,
+	.halt_check = BRANCH_HALT,
+	.clkr = {
+		.enable_reg = 0x9c00c,
+		.enable_mask = BIT(0),
+		.hw.init = &(struct clk_init_data){
+			.name = "gcc_eusb3_0_clkref_en",
+			.ops = &clk_branch2_ops,
+		},
+	},
+};
+
 static struct clk_branch gcc_ufs_0_clkref_en = {
 	.halt_reg = 0x9c000,
 	.halt_check = BRANCH_HALT,
@@ -545,6 +559,7 @@ static struct clk_regmap *gcc_sm7435_clocks[] = {
 	[GCC_GPLL0_OUT_EVEN] = &gcc_gpll0_out_even.clkr,
 	[GCC_AGGRE_UFS_PHY_AXI_CLK] = &gcc_aggre_ufs_phy_axi_clk.clkr,
 	[GCC_UFS_0_CLKREF_EN] = &gcc_ufs_0_clkref_en.clkr,
+	[GCC_EUSB3_0_CLKREF_EN] = &gcc_eusb3_0_clkref_en.clkr,
 	[GCC_UFS_PHY_AHB_CLK] = &gcc_ufs_phy_ahb_clk.clkr,
 	[GCC_UFS_PHY_AXI_CLK] = &gcc_ufs_phy_axi_clk.clkr,
 	[GCC_UFS_PHY_AXI_CLK_SRC] = &gcc_ufs_phy_axi_clk_src.clkr,
@@ -568,6 +583,7 @@ static struct clk_regmap *gcc_sm7435_clocks[] = {
 
 static const struct qcom_reset_map gcc_sm7435_resets[] = {
 	[GCC_UFS_PHY_BCR] = { 0x87000 },
+	[GCC_QUSB2PHY_PRIM_BCR] = { 0x22000 },
 };
 
 static struct gdsc *gcc_sm7435_gdscs[] = {

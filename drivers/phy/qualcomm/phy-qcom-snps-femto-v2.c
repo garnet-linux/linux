@@ -136,6 +136,8 @@ struct qcom_snps_hsphy {
 	bool phy_initialized;
 	enum phy_mode mode;
 	struct phy_override_seq update_seq_cfg[NUM_HSPHY_TUNING_PARAMS];
+	u32 *param_ovrd_seq;
+	int num_param_ovrd;
 };
 
 static int qcom_snps_hsphy_clk_init(struct qcom_snps_hsphy *hsphy)
@@ -441,6 +443,13 @@ static int qcom_snps_hsphy_init(struct phy *phy)
 					hsphy->update_seq_cfg[i].value);
 	}
 
+	/* raw <value offset> overrides, same format as the downstream driver */
+	for (i = 0; i + 1 < hsphy->num_param_ovrd; i += 2)
+		qcom_snps_hsphy_write_mask(hsphy->base,
+					hsphy->param_ovrd_seq[i + 1],
+					PARAM_OVRD_MASK,
+					hsphy->param_ovrd_seq[i]);
+
 	qcom_snps_hsphy_write_mask(hsphy->base,
 					USB2_PHY_USB_PHY_HS_PHY_CTRL_COMMON2,
 					VREGBYPASS, VREGBYPASS);
@@ -463,6 +472,22 @@ static int qcom_snps_hsphy_init(struct phy *phy)
 
 	qcom_snps_hsphy_write_mask(hsphy->base, USB2_PHY_USB_PHY_CFG0,
 					UTMI_PHY_CMN_CTRL_OVERRIDE_EN, 0);
+
+	dev_info(&phy->dev,
+		 "DEBUG regs: X0=%02x X1=%02x X2=%02x X3=%02x COMMON0=%02x COMMON1=%02x COMMON2=%02x CTRL1=%02x CTRL2=%02x UTMI0=%02x UTMI1=%02x CFG0=%02x REFCLK=%02x\n",
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_OVERRIDE_X0) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_OVERRIDE_X1) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_OVERRIDE_X2) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_OVERRIDE_X3) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_CTRL_COMMON0) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_CTRL_COMMON1) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_CTRL_COMMON2) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_CTRL1) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_HS_PHY_CTRL2) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_UTMI_CTRL0) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_UTMI_CTRL1) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_CFG0) & 0xff,
+		 readl(hsphy->base + USB2_PHY_USB_PHY_REFCLK_CTRL) & 0xff);
 
 	hsphy->phy_initialized = true;
 
@@ -583,6 +608,19 @@ static int qcom_snps_hsphy_probe(struct platform_device *pdev)
 	ret = qcom_snps_hsphy_clk_init(hsphy);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to initialize clocks\n");
+
+	ret = of_property_count_u32_elems(dev->of_node, "qcom,param-override-seq");
+	if (ret > 0 && !(ret % 2)) {
+		hsphy->param_ovrd_seq = devm_kcalloc(dev, ret, sizeof(u32), GFP_KERNEL);
+		if (!hsphy->param_ovrd_seq)
+			return -ENOMEM;
+		ret = of_property_read_u32_array(dev->of_node, "qcom,param-override-seq",
+						 hsphy->param_ovrd_seq, ret);
+		if (ret)
+			return ret;
+		hsphy->num_param_ovrd = of_property_count_u32_elems(dev->of_node,
+							"qcom,param-override-seq");
+	}
 
 	hsphy->phy_reset = devm_reset_control_get_exclusive(&pdev->dev, NULL);
 	if (IS_ERR(hsphy->phy_reset)) {
