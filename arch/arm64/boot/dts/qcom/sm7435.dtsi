@@ -715,6 +715,34 @@
 		};
 
 		/*
+		 * WiFi, WPSS-hosted.  Stock: qcom,icnss@22800000.  The firmware
+		 * on the WPSS exposes the ath10k-style QMI WLAN service
+		 * (service 0x45), so ath10k_snoc drives it.
+		 */
+		wifi: wifi@22800000 {
+			compatible = "qcom,wcn3990-wifi";
+			reg = <0x0 0x22800000 0x0 0x800000>;
+			reg-names = "membase";
+			memory-region = <&wlan_fw_mem>;
+			interrupts = <GIC_SPI 389 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 413 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 416 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 417 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 434 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 435 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 438 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 439 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 440 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 451 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 453 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 454 IRQ_TYPE_LEVEL_HIGH>;
+			iommus = <&apps_smmu 0x4c0 0x1>;
+			qcom,msa-fixed-perm;
+
+			status = "disabled";
+		};
+
+		/*
 		 * RPMh (resource power manager, hardened).  Same layout as
 		 * SM8550; the regulators used by the board (PM6150L LDOs) are
 		 * described as children of this node in the board DTS.
