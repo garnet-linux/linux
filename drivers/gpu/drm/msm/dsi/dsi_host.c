@@ -147,6 +147,7 @@ struct msm_dsi_host {
 	spinlock_t intr_lock; /* Protect interrupt ctrl register */
 
 	u32 err_work_state;
+	unsigned int dln0_phy_err_count;
 	struct work_struct err_work;
 	struct workqueue_struct *workqueue;
 
@@ -182,6 +183,7 @@ struct msm_dsi_host {
 	bool cphy_mode;
 
 	u32 dma_cmd_ctrl_restore;
+	u32 dma_trig_ctrl_restore;
 
 	bool registered;
 	bool power_on;
@@ -1464,10 +1466,18 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 		ret = wait_for_completion_timeout(&msm_host->dma_comp,
 					msecs_to_jiffies(200));
 		DBG("ret=%d", ret);
-		if (ret == 0)
+		if (ret == 0) {
+			dev_err(&msm_host->pdev->dev,
+				"DMA timeout: CTRL=%08x STATUS0=%08x INTR=%08x TRIG_CTRL=%08x DMA_CTRL=%08x\n",
+				dsi_read(msm_host, REG_DSI_CTRL),
+				dsi_read(msm_host, REG_DSI_STATUS0),
+				dsi_read(msm_host, REG_DSI_INTR_CTRL),
+				dsi_read(msm_host, REG_DSI_TRIG_CTRL),
+				dsi_read(msm_host, REG_DSI_CMD_DMA_CTRL));
 			ret = -ETIMEDOUT;
-		else
+		} else {
 			ret = len;
+		}
 	} else {
 		ret = len;
 	}
@@ -1578,6 +1588,20 @@ static void dsi_err_worker(struct work_struct *work)
 	if (status & DSI_ERR_STATE_MDP_FIFO_UNDERFLOW)
 		dsi_sw_reset(msm_host);
 
+	/*
+	 * A persistent lane 0 PHY error re-fires immediately after every ack
+	 * and turns into an interrupt storm. Give up after a few reports and
+	 * leave the error interrupt masked so the console stays usable.
+	 */
+	if ((status & DSI_ERR_STATE_DLN0_PHY) &&
+	    ++msm_host->dln0_phy_err_count > 16) {
+		if (msm_host->dln0_phy_err_count == 17)
+			DRM_DEV_ERROR(&msm_host->pdev->dev,
+				      "persistent DLN0 PHY error, leaving DSI error irq masked\n");
+		msm_host->err_work_state = 0;
+		return;
+	}
+
 	/* It is safe to clear here because error irq is disabled. */
 	msm_host->err_work_state = 0;
 
@@ -1623,6 +1647,11 @@ static void dsi_dln0_phy_err(struct msm_dsi_host *msm_host)
 			DSI_DLN0_PHY_ERR_DLN0_ERR_CONTENTION_LP0 |
 			DSI_DLN0_PHY_ERR_DLN0_ERR_CONTENTION_LP1)) {
 		dsi_write(msm_host, REG_DSI_DLN0_PHY_ERR, status);
+		if (msm_host->dln0_phy_err_count < 16)
+			DRM_DEV_ERROR(&msm_host->pdev->dev,
+				      "DLN0_PHY_ERR=0x%08x CLK_STATUS=0x%08x\n",
+				      status,
+				      dsi_read(msm_host, REG_DSI_CLK_STATUS));
 		msm_host->err_work_state |= DSI_ERR_STATE_DLN0_PHY;
 	}
 }
@@ -2189,6 +2218,18 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 	if (!(msg->flags & MIPI_DSI_MSG_USE_LPM))
 		dsi_set_tx_power_mode(0, msm_host);
 
+	/*
+	 * Video mode panels have no TE/command-mode frame boundary: with
+	 * BLOCK_DMA_WITHIN_FRAME (and TE) set, the DMA of the 2nd command never
+	 * starts (CMD_MODE_ENGINE_BUSY|DMA_BUSY stuck, no DMA_DONE irq).
+	 */
+	msm_host->dma_trig_ctrl_restore = dsi_read(msm_host, REG_DSI_TRIG_CTRL);
+	if (msm_host->mode_flags & MIPI_DSI_MODE_VIDEO)
+		dsi_write(msm_host, REG_DSI_TRIG_CTRL,
+			  msm_host->dma_trig_ctrl_restore &
+			  ~(DSI_TRIG_CTRL_BLOCK_DMA_WITHIN_FRAME |
+			    DSI_TRIG_CTRL_TE));
+
 	msm_host->dma_cmd_ctrl_restore = dsi_read(msm_host, REG_DSI_CTRL);
 	dsi_write(msm_host, REG_DSI_CTRL,
 		msm_host->dma_cmd_ctrl_restore |
@@ -2207,6 +2248,7 @@ void msm_dsi_host_xfer_restore(struct mipi_dsi_host *host,
 
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 0);
 	dsi_write(msm_host, REG_DSI_CTRL, msm_host->dma_cmd_ctrl_restore);
+	dsi_write(msm_host, REG_DSI_TRIG_CTRL, msm_host->dma_trig_ctrl_restore);
 
 	if (!(msg->flags & MIPI_DSI_MSG_USE_LPM))
 		dsi_set_tx_power_mode(1, msm_host);
