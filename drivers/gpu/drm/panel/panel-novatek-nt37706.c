@@ -31,6 +31,7 @@ struct nt37706_panel {
 	struct drm_dsc_config dsc;
 	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data supplies[3];
+	bool prepared;
 };
 
 static const struct regulator_bulk_data nt37706_supplies[] = {
@@ -103,8 +104,21 @@ static int nt37706_on(struct nt37706_panel *ctx)
 {
 	struct mipi_dsi_device *dsi = ctx->dsi;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
+	struct drm_dsc_picture_parameter_set pps;
 
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+
+	/*
+	 * The vendor timing node for this panel (n16_42_02_0b) does NOT have
+	 * qcom,mdss-dsc-config-by-manufacture-cmd (that property only exists in
+	 * the n16_36_0d_0a node), so the vendor DSI stack sends the DSC PPS
+	 * (DSI type 0x0a) itself, before the DCS init sequence. Without it the
+	 * DDIC never learns the slice/rate parameters, lights up for a moment
+	 * and then shows nothing. The host has already filled in ctx->dsc
+	 * (picture size, rc parameters, chunk size) at this point.
+	 */
+	drm_dsc_pps_payload_pack(&pps, &ctx->dsc);
+	mipi_dsi_picture_parameter_set_multi(&dsi_ctx, &pps);
 
 	nt37706_switch_page(&dsi_ctx, 0x00);
 	nt37706_write_seq(&dsi_ctx, 0x6f, 0x03);
@@ -170,7 +184,8 @@ static int nt37706_on(struct nt37706_panel *ctx)
 	nt37706_write_seq(&dsi_ctx, 0x3b, 0x00, 0x0b, 0x00, 0x2d);
 	nt37706_write_seq(&dsi_ctx, 0x35, 0x00);
 	nt37706_write_seq(&dsi_ctx, 0x6f, 0x04);
-	nt37706_write_seq(&dsi_ctx, 0x51, 0x00, 0x00);
+	/* TEST: initial DBV set here (no DSI cmd DMA once video is running) */
+	nt37706_write_seq(&dsi_ctx, 0x51, 0x01, 0x33);
 	nt37706_write_seq(&dsi_ctx, 0x53, 0x20);
 	nt37706_write_seq(&dsi_ctx, 0x57, 0x00);
 	nt37706_write_seq(&dsi_ctx, 0x2f, 0x00);
@@ -351,11 +366,6 @@ static int nt37706_on(struct nt37706_panel *ctx)
 				     0x00, 0x00, 0x00);
 	nt37706_write_seq(&dsi_ctx, 0xe6, 0x00);
 
-	/*
-	 * The vendor DT has qcom,mdss-dsc-config-by-manufacture-cmd: the DSC
-	 * parameters reach the DDIC through the 0x90/0x91 manufacturer commands
-	 * above, not through DSI PPS (0x0a) / compression mode (0x07) packets.
-	 */
 	mipi_dsi_msleep(&dsi_ctx, 28);
 
 	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
@@ -401,6 +411,8 @@ static int nt37706_prepare(struct drm_panel *panel)
 		return ret;
 	}
 
+	ctx->prepared = true;
+
 	dev_info(&ctx->dsi->dev,
 		 "panel on: %dx%d, DSC %dx%d, %d slices, %d bpc, %d bpp\n",
 		 ctx->dsc.pic_width, ctx->dsc.pic_height,
@@ -415,6 +427,8 @@ static int nt37706_unprepare(struct drm_panel *panel)
 {
 	struct nt37706_panel *ctx = to_nt37706_panel(panel);
 	int ret;
+
+	ctx->prepared = false;
 
 	ret = nt37706_off(ctx);
 	if (ret < 0)
@@ -447,29 +461,58 @@ static int nt37706_get_modes(struct drm_panel *panel,
 	return drm_connector_helper_get_modes_fixed(connector, &nt37706_mode);
 }
 
+static int nt37706_enable(struct drm_panel *panel)
+{
+	/*
+	 * drm_panel_enable() turns the backlight on right after this hook.
+	 * The vendor DT has qcom,bl-update-flag = "delay_until_first_frame":
+	 * let a few video frames go out before the first brightness write.
+	 */
+	msleep(50);
+
+	return 0;
+}
+
 static const struct drm_panel_funcs nt37706_panel_funcs = {
 	.prepare = nt37706_prepare,
+	.enable = nt37706_enable,
 	.unprepare = nt37706_unprepare,
 	.get_modes = nt37706_get_modes,
 };
 
 static int nt37706_bl_update_status(struct backlight_device *bl)
 {
-	struct mipi_dsi_device *dsi = bl_get_data(bl);
+	struct nt37706_panel *ctx = bl_get_data(bl);
+	struct mipi_dsi_device *dsi = ctx->dsi;
 	unsigned int brightness = backlight_get_brightness(bl);
+	unsigned long old_flags = dsi->mode_flags;
 	int ret;
 
 	/*
-	 * The panel uses inverted DBV: 0 is the brightest setting and 4095
-	 * is the dimmest one.
+	 * The backlight core calls us at registration time, before the panel
+	 * is powered and before the DSI host is up. Any DSI write then just
+	 * burns a 200 ms DMA timeout (the 0x51 timeout seen after a failed
+	 * init). The brightness is applied by drm_panel_enable() ->
+	 * backlight_enable() once the panel has been prepared.
 	 */
-	brightness = 4095 - brightness;
+	if (!ctx->prepared)
+		return 0;
 
-	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+	/* TEST: no DSI command DMA while video is running */
+	return 0;
 
-	ret = mipi_dsi_dcs_set_display_brightness_large(dsi, brightness);
-
+	/*
+	 * Not inverted: the vendor HBM commands are 51 07 ff (normal max) and
+	 * 51 0f ff (HBM), i.e. a bigger DBV is brighter. The vendor
+	 * "bl-inverted-dbv" flag only swaps the two bytes for the vendor DCS
+	 * helper, which the *_large() helper below already sends MSB first.
+	 * Sent in LP mode: an HS write right as the video stream starts leaves
+	 * DSI data lane 0 in a permanent PHY error state (dsi_err_worker
+	 * status=4 flood, DPU vblank timeouts, black panel).
+	 */
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
+	ret = mipi_dsi_dcs_set_display_brightness_large(dsi, brightness);
+	dsi->mode_flags = old_flags;
 
 	return ret;
 }
@@ -478,16 +521,16 @@ static const struct backlight_ops nt37706_bl_ops = {
 	.update_status = nt37706_bl_update_status,
 };
 
-static struct backlight_device *nt37706_create_backlight(struct mipi_dsi_device *dsi)
+static struct backlight_device *nt37706_create_backlight(struct nt37706_panel *ctx)
 {
-	struct device *dev = &dsi->dev;
+	struct device *dev = &ctx->dsi->dev;
 	const struct backlight_properties props = {
 		.type = BACKLIGHT_RAW,
 		.brightness = 307,
 		.max_brightness = 4095,
 	};
 
-	return devm_backlight_device_register(dev, dev_name(dev), dev, dsi,
+	return devm_backlight_device_register(dev, dev_name(dev), dev, ctx,
 					      &nt37706_bl_ops, &props);
 }
 
@@ -534,7 +577,7 @@ static int nt37706_probe(struct mipi_dsi_device *dsi)
 	dsi->dsc = &ctx->dsc;
 
 	ctx->panel.prepare_prev_first = true;
-	ctx->panel.backlight = nt37706_create_backlight(dsi);
+	ctx->panel.backlight = nt37706_create_backlight(ctx);
 	if (IS_ERR(ctx->panel.backlight))
 		return dev_err_probe(dev, PTR_ERR(ctx->panel.backlight),
 				     "Failed to create backlight\n");

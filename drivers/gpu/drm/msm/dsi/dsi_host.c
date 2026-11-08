@@ -5,6 +5,7 @@
 
 #include <linux/clk.h>
 #include <linux/delay.h>
+#include <linux/module.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
@@ -35,6 +36,16 @@
 #define DSI_RESET_TOGGLE_DELAY_MS 20
 
 static int dsi_populate_dsc_params(struct msm_dsi_host *msm_host, struct drm_dsc_config *dsc);
+
+/*
+ * EXPERIMENT: on sm7435 the first cmd DMA faults the SMMU at iova 0 although
+ * DMA_BASE holds the right iova. Allow clearing FROM_FRAME_BUFFER from the
+ * kernel command line (msm.dsi_dma_from_fb=0) to see if the engine then
+ * fetches from DMA_BASE.
+ */
+static bool dsi_dma_from_fb = true;
+module_param_named(dsi_dma_from_fb, dsi_dma_from_fb, bool, 0444);
+MODULE_PARM_DESC(dsi_dma_from_fb, "Set CMD_DMA_CTRL.FROM_FRAME_BUFFER (default: 1)");
 
 static int dsi_get_version(const void __iomem *base, u32 *major, u32 *minor)
 {
@@ -188,8 +199,15 @@ struct msm_dsi_host {
 	bool registered;
 	bool power_on;
 	bool enabled;
+	/* true once the DPU timing engine feeds the video engine */
+	bool video_streaming;
 	int irq;
 };
+
+/* not in dsi.xml: command DMA FIFO control, see msm_dsi_host_cmd_xfer_commit */
+#define DSI_DMA_FIFO_CTRL		0x4c
+#define DSI_DMA_FIFO_WR_WM_DISABLE	BIT(20)
+#define DSI_DMA_FIFO_RD_WM_DISABLE	BIT(16)
 
 static inline u32 dsi_read(struct msm_dsi_host *msm_host, u32 reg)
 {
@@ -683,6 +701,9 @@ static void dsi_calc_pclk(struct msm_dsi_host *msm_host, bool is_bonded_dsi)
 
 	DBG("pclk=%lu, bclk=%lu", msm_host->pixel_clk_rate,
 				msm_host->byte_clk_rate);
+	dev_info(&msm_host->pdev->dev, "DEBUG calc pclk=%lu byte=%lu fmt=%d lanes=%d\n",
+		 msm_host->pixel_clk_rate, msm_host->byte_clk_rate,
+		 msm_host->format, msm_host->lanes);
 }
 
 int dsi_calc_clk_rate_6g(struct msm_dsi_host *msm_host, bool is_bonded_dsi)
@@ -878,7 +899,7 @@ static void dsi_ctrl_enable(struct msm_dsi_host *msm_host,
 	}
 
 	dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL,
-			DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER |
+			(dsi_dma_from_fb ? DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER : 0) |
 			DSI_CMD_DMA_CTRL_LOW_POWER);
 
 	data = 0;
@@ -1187,13 +1208,15 @@ static void dsi_op_mode_config(struct msm_dsi_host *msm_host,
 
 static void dsi_set_tx_power_mode(int mode, struct msm_dsi_host *msm_host)
 {
-	u32 data;
+	/*
+	 * Do not read-modify-write: on sm7435 CMD_DMA_CTRL does not read back
+	 * what dsi_ctrl_enable() wrote, so a RMW sets FROM_FRAME_BUFFER again
+	 * and the first HS command fetches from iova 0 (SMMU fault, DSI DLN0
+	 * PHY error flood). Write the whole value, like dsi_ctrl_enable().
+	 */
+	u32 data = dsi_dma_from_fb ? DSI_CMD_DMA_CTRL_FROM_FRAME_BUFFER : 0;
 
-	data = dsi_read(msm_host, REG_DSI_CMD_DMA_CTRL);
-
-	if (mode == 0)
-		data &= ~DSI_CMD_DMA_CTRL_LOW_POWER;
-	else
+	if (mode != 0)
 		data |= DSI_CMD_DMA_CTRL_LOW_POWER;
 
 	dsi_write(msm_host, REG_DSI_CMD_DMA_CTRL, data);
@@ -1443,6 +1466,19 @@ int dsi_dma_base_get_v2(struct msm_dsi_host *msm_host, uint64_t *dma_base)
 	return 0;
 }
 
+/* DEBUG: dump the whole DSI controller register block (0x000-0x1ff) */
+static void dsi_dbg_dump(struct msm_dsi_host *msm_host, const char *tag)
+{
+	u32 buf[128];
+	int i;
+
+	for (i = 0; i < 128; i++)
+		buf[i] = dsi_read(msm_host, i * 4);
+	dev_info(&msm_host->pdev->dev, "dsi regs [%s]:\n", tag);
+	print_hex_dump(KERN_INFO, "dsiregs: ", DUMP_PREFIX_OFFSET, 16, 4, buf,
+		       sizeof(buf), false);
+}
+
 static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 {
 	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
@@ -1457,6 +1493,12 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 	}
 
 	reinit_completion(&msm_host->dma_comp);
+
+	/* DEBUG: iova we hand to the controller vs. what the registers hold */
+	dev_info(&msm_host->pdev->dev,
+		 "cmd dma: hw ver=%08x iova=%#llx len=%d tx_size=%d",
+		 dsi_read(msm_host, REG_DSI_VERSION), dma_base, len,
+		 msm_host->tx_size);
 
 	dsi_wait4video_eng_busy(msm_host);
 
@@ -1474,6 +1516,11 @@ static int dsi_cmd_dma_tx(struct msm_dsi_host *msm_host, int len)
 				dsi_read(msm_host, REG_DSI_INTR_CTRL),
 				dsi_read(msm_host, REG_DSI_TRIG_CTRL),
 				dsi_read(msm_host, REG_DSI_CMD_DMA_CTRL));
+			dsi_dbg_dump(msm_host, "timeout");
+			dev_err(&msm_host->pdev->dev,
+				"DMA timeout: DMA_BASE=%08x DMA_LEN=%08x iova=%#llx\n",
+				dsi_read(msm_host, REG_DSI_DMA_BASE),
+				dsi_read(msm_host, REG_DSI_DMA_LEN), dma_base);
 			ret = -ETIMEDOUT;
 		} else {
 			ret = len;
@@ -1664,6 +1711,16 @@ static void dsi_fifo_status(struct msm_dsi_host *msm_host)
 
 	/* fifo underflow, overflow */
 	if (status) {
+		static int dbg_cnt;
+
+		if (dbg_cnt++ < 4)
+			dev_err(&msm_host->pdev->dev,
+				"DEBUG FIFO_STATUS=0x%08x STATUS0=0x%08x CTRL=0x%08x pclk=%lu byte=%lu bytes_per_line=%d\n",
+				status, dsi_read(msm_host, REG_DSI_STATUS0),
+				dsi_read(msm_host, REG_DSI_CTRL),
+				clk_get_rate(msm_host->pixel_clk),
+				clk_get_rate(msm_host->byte_clk),
+				msm_host->dsc ? msm_dsc_get_bytes_per_line(msm_host->dsc) : 0);
 		dsi_write(msm_host, REG_DSI_FIFO_STATUS, status);
 		msm_host->err_work_state |= DSI_ERR_STATE_FIFO;
 		if (status & DSI_FIFO_STATUS_CMD_MDP_FIFO_UNDERFLOW)
@@ -2198,6 +2255,7 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 {
 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
 	const struct msm_dsi_cfg_handler *cfg_hnd = msm_host->cfg_hnd;
+	u32 ctrl;
 
 	/* TODO: make sure dsi_cmd_mdp is idle.
 	 * Since DSI6G v1.2.0, we can set DSI_TRIG_CTRL.BLOCK_DMA_WITHIN_FRAME
@@ -2231,10 +2289,24 @@ int msm_dsi_host_xfer_prepare(struct mipi_dsi_host *host,
 			    DSI_TRIG_CTRL_TE));
 
 	msm_host->dma_cmd_ctrl_restore = dsi_read(msm_host, REG_DSI_CTRL);
-	dsi_write(msm_host, REG_DSI_CTRL,
-		msm_host->dma_cmd_ctrl_restore |
-		DSI_CTRL_CMD_MODE_EN |
-		DSI_CTRL_ENABLE);
+	ctrl = msm_host->dma_cmd_ctrl_restore |
+	       DSI_CTRL_CMD_MODE_EN | DSI_CTRL_ENABLE;
+
+	/*
+	 * Video mode panels are enabled (VID_MODE_EN) before the panel is
+	 * prepared, but the DPU timing engine only starts after that, so there
+	 * is no video stream (and no BLLP) yet.  With both engines enabled in
+	 * that state the command engine locks up: STATUS0 reads
+	 * CMD_MODE_ENGINE_BUSY | CMD_MODE_DMA_BUSY forever and CMD_DMA_DONE
+	 * never fires (-110 on the 2nd command).  The vendor driver sends the
+	 * panel on-commands with the video engine off, so do the same until
+	 * the stream is running.  xfer_restore() puts CTRL back.
+	 */
+	if ((msm_host->mode_flags & MIPI_DSI_MODE_VIDEO) &&
+	    !msm_host->video_streaming)
+		ctrl &= ~DSI_CTRL_VID_MODE_EN;
+
+	dsi_write(msm_host, REG_DSI_CTRL, ctrl);
 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_CMD_DMA_DONE, 1);
 
 	return 0;
@@ -2409,6 +2481,18 @@ void msm_dsi_host_cmd_xfer_commit(struct mipi_dsi_host *host, u32 dma_base,
 				  u32 len)
 {
 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
+	u32 fifo_ctrl;
+
+	/*
+	 * The vendor driver (dsi_ctrl_hw_cmn_kickoff_command) disables the
+	 * command DMA FIFO read/write watermarks before every transfer; the
+	 * register is not described in dsi.xml (vendor 0x50, i.e. 0x4c here).
+	 * On garnet the DMA engine otherwise never completes.
+	 */
+	fifo_ctrl = dsi_read(msm_host, DSI_DMA_FIFO_CTRL);
+	dsi_write(msm_host, DSI_DMA_FIFO_CTRL,
+		  fifo_ctrl | DSI_DMA_FIFO_WR_WM_DISABLE |
+		  DSI_DMA_FIFO_RD_WM_DISABLE);
 
 	dsi_write(msm_host, REG_DSI_DMA_BASE, dma_base);
 	dsi_write(msm_host, REG_DSI_DMA_LEN, len);
@@ -2498,11 +2582,19 @@ int msm_dsi_host_enable(struct mipi_dsi_host *host)
 	return 0;
 }
 
+void msm_dsi_host_video_start(struct mipi_dsi_host *host)
+{
+	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
+
+	msm_host->video_streaming = true;
+}
+
 int msm_dsi_host_disable(struct mipi_dsi_host *host)
 {
 	struct msm_dsi_host *msm_host = to_msm_dsi_host(host);
 
 	msm_host->enabled = false;
+	msm_host->video_streaming = false;
 	dsi_op_mode_config(msm_host,
 		!!(msm_host->mode_flags & MIPI_DSI_MODE_VIDEO), false);
 
@@ -2572,9 +2664,11 @@ int msm_dsi_host_power_on(struct mipi_dsi_host *host,
 		goto fail_disable_clk;
 	}
 
+	dsi_dbg_dump(msm_host, "bootloader state");
 	dsi_timing_setup(msm_host, is_bonded_dsi);
 	dsi_sw_reset(msm_host);
 	dsi_ctrl_enable(msm_host, phy_shared_timings, phy);
+	dsi_dbg_dump(msm_host, "after ctrl_enable");
 
 	msm_host->power_on = true;
 	mutex_unlock(&msm_host->dev_mutex);
