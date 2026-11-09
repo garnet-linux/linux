@@ -2498,6 +2498,12 @@ void msm_dsi_host_cmd_xfer_commit(struct mipi_dsi_host *host, u32 dma_base,
 	dsi_write(msm_host, REG_DSI_DMA_LEN, len);
 	dsi_write(msm_host, REG_DSI_TRIG_DMA, 1);
 
+	/* DEBUG: correlate cmd-DMA IOVA with SMMU faults (SID 0x800, iova 0) */
+	pr_err("GARNET-DBG dsi%d: dma_base=%#x len=%u rb_base=%#x cmd_dma_ctrl=%#x\n",
+	       msm_host->id, dma_base, len,
+	       dsi_read(msm_host, REG_DSI_DMA_BASE),
+	       dsi_read(msm_host, REG_DSI_CMD_DMA_CTRL));
+
 	/* Make sure trigger happens */
 	wmb();
 }

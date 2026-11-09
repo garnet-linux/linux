@@ -1307,6 +1307,8 @@ static int dpu_kms_init(struct drm_device *ddev)
 		dev_pm_opp_put(opp);
 
 	dev_pm_opp_set_rate(dev, max_freq);
+	pr_err("GARNET-DBG: mdp core opp requested=%lu actual=%lu\n",
+	       max_freq, dpu_kms_get_clk_rate(dpu_kms, "core"));
 
 	ret = msm_kms_init(&dpu_kms->base, &kms_funcs);
 	if (ret) {

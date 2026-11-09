@@ -27,6 +27,7 @@
 #define   CTL_START                     0x01C
 #define   CTL_PREPARE                   0x0d0
 #define   CTL_SW_RESET                  0x030
+#define   CTL_SW_RESET_OVERRIDE         0x060
 #define   CTL_LAYER_EXTN_OFFSET         0x40
 #define   CTL_MERGE_3D_ACTIVE           0x0E4
 #define   CTL_DSC_ACTIVE                0x0E8
@@ -51,6 +52,7 @@
 #define CTL_FLUSH_MASK_CTL              BIT(17)
 
 #define DPU_REG_RESET_TIMEOUT_US        2000
+#define DPU_REG_WAIT_RESET_TIMEOUT_US   100000
 #define  MERGE_3D_IDX   23
 #define  DSC_IDX        22
 #define CDM_IDX         26
@@ -447,18 +449,31 @@ static int dpu_hw_ctl_reset_control(struct dpu_hw_ctl *ctx)
 static int dpu_hw_ctl_wait_reset_status(struct dpu_hw_ctl *ctx)
 {
 	struct dpu_hw_blk_reg_map *c = &ctx->hw;
-	u32 status;
+	ktime_t start;
+	u32 status, override, ctl_top;
 
 	status = DPU_REG_READ(c, CTL_SW_RESET);
 	status &= 0x01;
 	if (!status)
 		return 0;
 
-	pr_debug("hw ctl reset is set for ctl:%d\n", ctx->idx);
-	if (dpu_hw_ctl_poll_reset_status(ctx, DPU_REG_RESET_TIMEOUT_US)) {
+	override = DPU_REG_READ(c, CTL_SW_RESET_OVERRIDE);
+	ctl_top = DPU_REG_READ(c, CTL_TOP);
+	pr_err("GARNET-DBG ctl%d: wait enter swreset=%x override=%x top=%08x\n",
+	       ctx->idx, status, override, ctl_top);
+
+	start = ktime_get();
+	if (dpu_hw_ctl_poll_reset_status(ctx, DPU_REG_WAIT_RESET_TIMEOUT_US)) {
+		pr_err("GARNET-DBG ctl%d: hw recovery incomplete after %lld us swreset=%x override=%x\n",
+		       ctx->idx, ktime_to_us(ktime_sub(ktime_get(), start)),
+		       DPU_REG_READ(c, CTL_SW_RESET),
+		       DPU_REG_READ(c, CTL_SW_RESET_OVERRIDE));
 		pr_err("hw recovery is not complete for ctl:%d\n", ctx->idx);
 		return -EINVAL;
 	}
+
+	pr_err("GARNET-DBG ctl%d: hw recovery OK after %lld us\n",
+	       ctx->idx, ktime_to_us(ktime_sub(ktime_get(), start)));
 
 	return 0;
 }
