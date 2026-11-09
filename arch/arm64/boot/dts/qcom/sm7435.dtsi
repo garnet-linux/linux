@@ -616,6 +616,10 @@
 			#clock-cells = <1>;
 			#reset-cells = <1>;
 			#power-domain-cells = <1>;
+
+			/* stock: vdd_cx-supply = VDD_CX_LEVEL (no MMCX on this SoC) */
+			power-domains = <&rpmhpd RPMHPD_CX>;
+			required-opps = <&rpmhpd_opp_low_svs>;
 		};
 
 		/*
@@ -666,8 +670,25 @@
 					 <&dispcc DISP_CC_MDSS_VSYNC_CLK>;
 				clock-names = "bus", "iface", "lut", "core", "vsync";
 
-				assigned-clocks = <&dispcc DISP_CC_MDSS_VSYNC_CLK>;
-				assigned-clock-rates = <19200000>;
+				/*
+				 * No OPP table yet (no MMCX rpmhpd), so nothing else sets the
+				 * MDP core rate; don't rely on whatever the boot chain left.
+				 */
+				assigned-clocks = <&dispcc DISP_CC_MDSS_MDP_CLK_SRC>,
+						  <&dispcc DISP_CC_MDSS_VSYNC_CLK>;
+				assigned-clock-rates = <325000000>,
+						       <19200000>;
+
+				/*
+				 * Without an OPP table dpu_runtime_resume() asks for the
+				 * highest possible core rate (506 MHz seen in clk_summary).
+				 * MMCX/CX can't be voted yet, so cap the core clock at a
+				 * level the boot-time rail state can sustain.
+				 */
+				power-domains = <&rpmhpd RPMHPD_CX>;
+				operating-points-v2 = <&mdp_opp_table>;
+
+
 
 				ports {
 					#address-cells = <1>;
@@ -679,6 +700,35 @@
 						dpu_intf1_out: endpoint {
 							remote-endpoint = <&mdss_dsi0_in>;
 						};
+					};
+				};
+
+				/*
+				 * Rates from downstream clock-rate/clock-max-rate and the
+				 * dispcc mdp_clk_src table.  No required-opps: MMCX is not
+				 * described yet (rpmhpd milos has no MMCX).
+				 */
+				mdp_opp_table: opp-table {
+					compatible = "operating-points-v2";
+
+					opp-200000000 {
+						opp-hz = /bits/ 64 <200000000>;
+					};
+
+					opp-325000000 {
+						opp-hz = /bits/ 64 <325000000>;
+					};
+
+					opp-380000000 {
+						opp-hz = /bits/ 64 <380000000>;
+					};
+
+					opp-506000000 {
+						opp-hz = /bits/ 64 <506000000>;
+					};
+
+					opp-608000000 {
+						opp-hz = /bits/ 64 <608000000>;
 					};
 				};
 			};

@@ -14,6 +14,7 @@
 
 #include <drm/display/drm_dsc_helper.h>
 #include <drm/drm_managed.h>
+#include <linux/delay.h>
 
 #define DPU_DEBUG_VIDENC(e, fmt, ...) DPU_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->parent ? \
@@ -571,8 +572,39 @@ static void dpu_encoder_phys_vid_prepare_for_kickoff(
 		DPU_ERROR_VIDENC(phys_enc, "ctl %d reset failure: %d\n",
 				ctl->idx, rc);
 		msm_disp_snapshot_state(drm_enc->dev);
-		dpu_core_irq_unregister_callback(phys_enc->dpu_kms,
-				phys_enc->irq[INTR_IDX_VSYNC]);
+		/*
+		 * The hw initiated CTL reset never completes on its own here
+		 * (swreset stays 1 for thousands of frames while the INTF keeps
+		 * counting).  Try to recover with an explicit sw reset.
+		 */
+		rc = ctl->ops.reset(ctl);
+		pr_err("GARNET-DBG: sw ctl reset retry rc=%d swreset=%x\n",
+		       rc, DPU_REG_READ(&ctl->hw, 0x030));
+		/* DEBUG: is the INTF timing engine really counting? */
+		if (phys_enc->hw_intf) {
+			struct dpu_hw_blk_reg_map *ic = &phys_enc->hw_intf->hw;
+			struct dpu_hw_blk_reg_map *cc = &ctl->hw;
+			int i;
+
+			for (i = 0; i < 5; i++) {
+				pr_err("GARNET-DBG[%d]: intf en=%x frame=%u line=%u | ctl flush=%08x start=%x swreset=%x\n",
+				       i,
+				       DPU_REG_READ(ic, 0x000),
+				       DPU_REG_READ(ic, 0x0ac),
+				       DPU_REG_READ(ic, 0x0b0),
+				       DPU_REG_READ(cc, 0x018),
+				       DPU_REG_READ(cc, 0x01c),
+				       DPU_REG_READ(cc, 0x030));
+				msleep(3);
+			}
+		}
+		/*
+		 * Don't unregister the vsync irq here.  The hw initiated reset
+		 * is only polled for DPU_REG_RESET_TIMEOUT_US (2 ms), which is
+		 * shorter than one frame at 120 Hz, and without the vsync irq
+		 * nothing can ever observe the reset finishing: every later
+		 * commit then times out waiting for vblank.
+		 */
 	}
 }
 

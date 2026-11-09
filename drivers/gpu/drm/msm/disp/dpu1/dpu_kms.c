@@ -1233,6 +1233,7 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 		max_core_clk_rate = DPU_PERF_DEFAULT_MAX_CORE_CLK_RATE;
 	}
 
+	pr_info("GARNET-DBG: dpu core clk %lu Hz\n", max_core_clk_rate);
 	rc = dpu_core_perf_init(&dpu_kms->perf, dpu_kms->catalog->perf, max_core_clk_rate);
 	if (rc) {
 		DPU_ERROR("failed to init perf %d\n", rc);
