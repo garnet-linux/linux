@@ -1167,15 +1167,6 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 
 	pr_info("dpu hardware revision:0x%x\n", core_rev);
 
-	/* GARNET-DBG: raw ctl0/intf1 state before we touch anything */
-	pr_err("GARNET-DBG init-pre: intf1 en=%x frame=%u | ctl0 swreset=%x override=%x start=%x top=%08x\n",
-	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x000),
-	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x0ac),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x060),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x01c),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x014));
-
 	dpu_kms->catalog = of_device_get_match_data(dev->dev);
 	if (!dpu_kms->catalog) {
 		DPU_ERROR("device config not known!\n");
@@ -1242,7 +1233,6 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 		max_core_clk_rate = DPU_PERF_DEFAULT_MAX_CORE_CLK_RATE;
 	}
 
-	pr_info("GARNET-DBG: dpu core clk %lu Hz\n", max_core_clk_rate);
 	rc = dpu_core_perf_init(&dpu_kms->perf, dpu_kms->catalog->perf, max_core_clk_rate);
 	if (rc) {
 		DPU_ERROR("failed to init perf %d\n", rc);
@@ -1287,35 +1277,6 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 		goto err_pm_put;
 	}
 
-	/* GARNET-DBG: raw ctl0/intf1 state after full hw init */
-	pr_err("GARNET-DBG init-post: intf1 en=%x frame=%u | ctl0 swreset=%x override=%x start=%x top=%08x\n",
-	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x000),
-	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x0ac),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x060),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x01c),
-	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x014));
-
-	if (readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030) & 0x1) {
-		u32 v;
-		int i;
-
-		pr_err("GARNET-DBG: ctl0 already stuck in reset at hw_init, override pulse\n");
-		writel_relaxed(0x1, dpu_kms->mmio + 0x15000 + 0x060);
-		usleep_range(2000, 2500);
-		writel_relaxed(0x0, dpu_kms->mmio + 0x15000 + 0x060);
-
-		v = 1;
-		for (i = 0; i < 2000; i++) {
-			v = readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030) & 0x1;
-			if (!v)
-				break;
-			usleep_range(50, 100);
-		}
-		pr_err("GARNET-DBG: ctl0 after hw_init override swreset=%x (waited %d us)\n",
-		       v, i * 50);
-	}
-
 	dpu_vbif_init_memtypes(dpu_kms);
 
 	pm_runtime_put_sync(&dpu_kms->pdev->dev);
@@ -1345,8 +1306,6 @@ static int dpu_kms_init(struct drm_device *ddev)
 		dev_pm_opp_put(opp);
 
 	dev_pm_opp_set_rate(dev, max_freq);
-	pr_err("GARNET-DBG: mdp core opp requested=%lu actual=%lu\n",
-	       max_freq, dpu_kms_get_clk_rate(dpu_kms, "core"));
 
 	ret = msm_kms_init(&dpu_kms->base, &kms_funcs);
 	if (ret) {
@@ -1547,7 +1506,6 @@ static const struct of_device_id dpu_dt_match[] = {
 	{ .compatible = "qcom,sm6350-dpu", .data = &dpu_sm6350_cfg, },
 	{ .compatible = "qcom,sm6375-dpu", .data = &dpu_sm6375_cfg, },
 	{ .compatible = "qcom,sm7150-dpu", .data = &dpu_sm7150_cfg, },
-	{ .compatible = "qcom,sm7435-dpu", .data = &dpu_sm7435_cfg, },
 	{ .compatible = "qcom,sm8150-dpu", .data = &dpu_sm8150_cfg, },
 	{ .compatible = "qcom,sm8250-dpu", .data = &dpu_sm8250_cfg, },
 	{ .compatible = "qcom,sm8350-dpu", .data = &dpu_sm8350_cfg, },

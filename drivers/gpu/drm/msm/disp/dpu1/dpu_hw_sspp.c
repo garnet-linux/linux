@@ -479,16 +479,6 @@ static void dpu_hw_sspp_setup_sourceaddress(struct dpu_sw_pipe *pipe,
 	if (!ctx)
 		return;
 
-	{
-		static int dbg_cnt;
-
-		if (dbg_cnt++ < 12)
-			pr_err("GARNET-DBG sspp%d rect%d addr %08x %08x %08x %08x\n",
-			       ctx->idx, pipe->multirect_index,
-			       layout->plane_addr[0], layout->plane_addr[1],
-			       layout->plane_addr[2], layout->plane_addr[3]);
-	}
-
 	if (pipe->multirect_index == DPU_SSPP_RECT_SOLO) {
 		for (i = 0; i < ARRAY_SIZE(layout->plane_addr); i++)
 			DPU_REG_WRITE(&ctx->hw, SSPP_SRC0_ADDR + i * 0x4,

@@ -10,7 +10,6 @@
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
 #include <linux/debugfs.h>
 #include <linux/kthread.h>
-#include <linux/module.h>
 #include <linux/seq_file.h>
 
 #include <drm/drm_atomic.h>
@@ -36,16 +35,6 @@
 #include "dpu_trace.h"
 #include "dpu_core_irq.h"
 #include "disp/msm_disp_snapshot.h"
-
-/*
- * GARNET debug knobs (kernel command line, e.g. dpu.dsc_once=1):
- * dsc_once     - program the DSC block and request its flush only once per
- *                enable instead of on every kickoff (downstream only redoes
- *                this when the DSC config is dirty).
- */
-static bool dpu_dsc_once = true;
-module_param_named(dsc_once, dpu_dsc_once, bool, 0644);
-MODULE_PARM_DESC(dsc_once, "Program/flush DSC only once per enable (default: on)");
 
 #define DPU_DEBUG_ENC(e, fmt, ...) DRM_DEBUG_ATOMIC("enc%d " fmt,\
 		(e) ? (e)->base.base.id : -1, ##__VA_ARGS__)
@@ -199,7 +188,6 @@ struct dpu_encoder_virt {
 
 	unsigned int dsc_mask;
 	unsigned int cwb_mask;
-	bool dsc_configured;
 
 	bool intfs_swapped;
 
@@ -1240,7 +1228,6 @@ static void dpu_encoder_virt_atomic_mode_set(struct drm_encoder *drm_enc,
 	}
 
 	dpu_enc->dsc_mask = dsc_mask;
-	dpu_enc->dsc_configured = false;
 
 	if ((dpu_enc->disp_info.intf_type == INTF_WB && conn_state->writeback_job) ||
 	    dpu_enc->disp_info.intf_type == INTF_DP) {
@@ -2022,40 +2009,6 @@ static void dpu_encoder_dsc_pipe_cfg(struct dpu_hw_ctl *ctl,
 
 	if (ctl->ops.update_pending_flush_dsc)
 		ctl->ops.update_pending_flush_dsc(ctl, hw_dsc->idx);
-
-	/* GARNET debug: one-shot readback of the dsc programming */
-	{
-		static bool dsc_dbg_done;
-		struct dpu_hw_blk_reg_map *hw = &hw_dsc->hw;
-		const struct dpu_dsc_sub_blks *sblk = hw_dsc->caps->sblk;
-
-		if (!dsc_dbg_done) {
-			dsc_dbg_done = true;
-			pr_err("GARNET-DBG dsc%d cfg: mode=%x init_lines=%u slices=%u pic=%ux%u slice=%ux%u bpp=%u bpc=%u chunk=%u xmit=%u\n",
-			       hw_dsc->idx, common_mode, initial_lines,
-			       dsc->slice_count, dsc->pic_width, dsc->pic_height,
-			       dsc->slice_width, dsc->slice_height,
-			       dsc->bits_per_pixel, dsc->bits_per_component,
-			       dsc->slice_chunk_size, dsc->initial_xmit_delay);
-			pr_err("GARNET-DBG dsc%d regs: ctl=%x cfg=%x swap=%x clk=%x cmn=%x df=%x main=%x pic=%x slice=%x misc=%x hrd=%x gen=%x hslice=%x out=%x intstat=%x\n",
-			       hw_dsc->idx,
-			       DPU_REG_READ(hw, sblk->ctl.base + 0x00),
-			       DPU_REG_READ(hw, sblk->ctl.base + 0x04),
-			       DPU_REG_READ(hw, sblk->ctl.base + 0x08),
-			       DPU_REG_READ(hw, sblk->ctl.base + 0x0C),
-			       DPU_REG_READ(hw, 0x00),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x00),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x30),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x34),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x38),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x3C),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x40),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x04),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x08),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x0C),
-			       DPU_REG_READ(hw, sblk->enc.base + 0x10));
-		}
-	}
 }
 
 static void dpu_encoder_prep_dsc(struct dpu_encoder_virt *dpu_enc,
@@ -2105,26 +2058,6 @@ static void dpu_encoder_prep_dsc(struct dpu_encoder_virt *dpu_enc,
 }
 
 /**
- * dpu_encoder_restore_intf_cfg - rewrite the ctl_path interface configuration
- *	The ctl path register file is reset when the ctl block is hard reset.
- *	The INTF block keeps running, but its association with the ctl path
- *	(and the ctl top level config) has to be restored.
- * @drm_enc:	encoder pointer
- */
-void dpu_encoder_restore_intf_cfg(struct drm_encoder *drm_enc)
-{
-	struct dpu_encoder_virt *dpu_enc = to_dpu_encoder_virt(drm_enc);
-	struct dpu_encoder_phys *phys;
-	unsigned int i;
-
-	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
-		phys = dpu_enc->phys_encs[i];
-		if (phys->ops.restore_intf_cfg)
-			phys->ops.restore_intf_cfg(phys);
-	}
-}
-
-/**
  * dpu_encoder_prepare_for_kickoff - schedule double buffer flip of the ctl
  *	path (i.e. ctl flush and start) at next appropriate time.
  *	Immediately: if no previous commit is outstanding.
@@ -2163,10 +2096,8 @@ void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc)
 		}
 	}
 
-	if (dpu_enc->dsc && (!dpu_dsc_once || !dpu_enc->dsc_configured)) {
+	if (dpu_enc->dsc)
 		dpu_encoder_prep_dsc(dpu_enc, dpu_enc->dsc);
-		dpu_enc->dsc_configured = true;
-	}
 }
 
 /**
@@ -2302,7 +2233,6 @@ static void dpu_encoder_dsc_pipe_clr(struct dpu_hw_ctl *ctl,
 static void dpu_encoder_unprep_dsc(struct dpu_encoder_virt *dpu_enc)
 {
 	/* coding only for 2LM, 2enc, 1 dsc config */
-	dpu_enc->dsc_configured = false;
 	struct dpu_encoder_phys *enc_master = dpu_enc->cur_master;
 	struct dpu_hw_ctl *ctl = enc_master->hw_ctl;
 	struct dpu_hw_dsc *hw_dsc[MAX_CHANNELS_PER_ENC];

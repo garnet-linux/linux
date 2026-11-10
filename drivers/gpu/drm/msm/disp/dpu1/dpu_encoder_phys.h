@@ -82,7 +82,6 @@ struct dpu_encoder_phys;
  * @prepare_for_kickoff:	Do any work necessary prior to a kickoff
  *				For CMD encoder, may wait for previous tx done
  * @handle_post_kickoff:	Do any work necessary post-kickoff work
- * @restore_intf_cfg:		Rewrite the ctl_path interface config
  * @trigger_start:		Process start event on physical encoder
  * @needs_single_flush:		Whether encoder slaves need to be flushed
  * @irq_enable:			Handler to enable all the encoder IRQs
@@ -106,7 +105,6 @@ struct dpu_encoder_phys_ops {
 	int (*wait_for_tx_complete)(struct dpu_encoder_phys *phys_enc);
 	void (*prepare_for_kickoff)(struct dpu_encoder_phys *phys_enc);
 	void (*handle_post_kickoff)(struct dpu_encoder_phys *phys_enc);
-	void (*restore_intf_cfg)(struct dpu_encoder_phys *phys_enc);
 	void (*trigger_start)(struct dpu_encoder_phys *phys_enc);
 	bool (*needs_single_flush)(struct dpu_encoder_phys *phys_enc);
 	void (*irq_enable)(struct dpu_encoder_phys *phys);

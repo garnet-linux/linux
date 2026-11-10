@@ -4,7 +4,6 @@
  */
 
 #include <linux/delay.h>
-#include <linux/module.h>
 
 #include <drm/drm_managed.h>
 
@@ -28,8 +27,6 @@
 #define   CTL_START                     0x01C
 #define   CTL_PREPARE                   0x0d0
 #define   CTL_SW_RESET                  0x030
-#define   CTL_SW_RESET_OVERRIDE         0x060
-#define   CTL_STATUS                    0x064
 #define   CTL_LAYER_EXTN_OFFSET         0x40
 #define   CTL_MERGE_3D_ACTIVE           0x0E4
 #define   CTL_DSC_ACTIVE                0x0E8
@@ -54,7 +51,6 @@
 #define CTL_FLUSH_MASK_CTL              BIT(17)
 
 #define DPU_REG_RESET_TIMEOUT_US        2000
-#define DPU_REG_WAIT_RESET_TIMEOUT_US   100000
 #define  MERGE_3D_IDX   23
 #define  DSC_IDX        22
 #define CDM_IDX         26
@@ -65,15 +61,6 @@
 #define  DSPP_IDX       29  /* From DPU hw rev 7.x.x */
 #define CTL_INVALID_BIT                 0xffff
 #define CTL_DEFAULT_GROUP_ID		0xf
-
-/*
- * GARNET debug knob (kernel command line, e.g. dpu.dsc_no_active=1):
- * do not advertise the DSC blocks in CTL_DSC_ACTIVE on the enable path.
- * Downstream only programs that bitmap from the DCE update path.
- */
-static bool dpu_dsc_no_active;
-module_param_named(dsc_no_active, dpu_dsc_no_active, bool, 0644);
-MODULE_PARM_DESC(dsc_no_active, "Do not set CTL_DSC_ACTIVE from intf_cfg_v1");
 
 static const u32 fetch_tbl[SSPP_MAX] = {CTL_INVALID_BIT, 16, 17, 18, 19,
 	CTL_INVALID_BIT, CTL_INVALID_BIT, CTL_INVALID_BIT, CTL_INVALID_BIT, 0,
@@ -104,32 +91,11 @@ static inline u32 dpu_hw_ctl_get_flush_register(struct dpu_hw_ctl *ctx)
 	return DPU_REG_READ(c, CTL_FLUSH);
 }
 
-static void dpu_hw_ctl_dbg_dump(struct dpu_hw_ctl *ctx, const char *tag);
-static void dpu_hw_ctl_dbg_probe_flush(struct dpu_hw_ctl *ctx);
-static void dpu_hw_ctl_hard_reset(struct dpu_hw_ctl *ctx, bool reset);
-
-static void dpu_hw_ctl_dbg_note(struct dpu_hw_ctl *ctx, const char *what)
-{
-	if (ctx->dbg_count >= 32)
-		return;
-
-	ctx->dbg_count++;
-	pr_err("GARNET-DBG ctl%d: %s swreset=%x override=%x fetch=%08x start=%x flush=%08x\n",
-	       ctx->idx, what,
-	       DPU_REG_READ(&ctx->hw, CTL_SW_RESET),
-	       DPU_REG_READ(&ctx->hw, CTL_SW_RESET_OVERRIDE),
-	       DPU_REG_READ(&ctx->hw, CTL_FETCH_PIPE_ACTIVE),
-	       DPU_REG_READ(&ctx->hw, CTL_START),
-	       DPU_REG_READ(&ctx->hw, CTL_FLUSH));
-}
-
 static inline void dpu_hw_ctl_trigger_start(struct dpu_hw_ctl *ctx)
 {
 	trace_dpu_hw_ctl_trigger_start(ctx->pending_flush_mask,
 				       dpu_hw_ctl_get_flush_register(ctx));
-	dpu_hw_ctl_dbg_note(ctx, "start-pre");
 	DPU_REG_WRITE(&ctx->hw, CTL_START, 0x1);
-	dpu_hw_ctl_dbg_note(ctx, "start-post");
 }
 
 static inline bool dpu_hw_ctl_is_started(struct dpu_hw_ctl *ctx)
@@ -178,9 +144,6 @@ static inline void dpu_hw_ctl_trigger_flush_v1(struct dpu_hw_ctl *ctx)
 {
 	int dspp;
 
-	if (!ctx->dbg_probe_done)
-		dpu_hw_ctl_dbg_probe_flush(ctx);
-
 	if (ctx->pending_flush_mask & BIT(MERGE_3D_IDX))
 		DPU_REG_WRITE(&ctx->hw, CTL_MERGE_3D_FLUSH,
 				ctx->pending_merge_3d_flush_mask);
@@ -214,9 +177,7 @@ static inline void dpu_hw_ctl_trigger_flush_v1(struct dpu_hw_ctl *ctx)
 		DPU_REG_WRITE(&ctx->hw, CTL_CDM_FLUSH,
 			      ctx->pending_cdm_flush_mask);
 
-	dpu_hw_ctl_dbg_note(ctx, "flush-pre");
 	DPU_REG_WRITE(&ctx->hw, CTL_FLUSH, ctx->pending_flush_mask);
-	dpu_hw_ctl_dbg_note(ctx, "flush-post");
 }
 
 static inline void dpu_hw_ctl_trigger_flush(struct dpu_hw_ctl *ctx)
@@ -449,149 +410,6 @@ static void dpu_hw_ctl_update_pending_flush_dspp_sub_blocks(
 	ctx->pending_flush_mask |= BIT(DSPP_IDX);
 }
 
-static void dpu_hw_ctl_dbg_dump(struct dpu_hw_ctl *ctx, const char *tag)
-{
-	struct dpu_hw_blk_reg_map *c = &ctx->hw;
-	enum dpu_lm lm = ctx->mixer_count ? ctx->mixer_hw_caps[0].id : LM_0;
-
-	if (ctx->dbg_dump_count >= 12)
-		return;
-	ctx->dbg_dump_count++;
-
-	pr_err("GARNET-DBG ctl%d %s: swreset=%08x override=%08x status=%08x top=%08x flush=%08x active[intf=%08x master=%08x dsc=%08x merge3d=%08x wb=%08x cwb=%08x cdm=%08x] fetch=%08x pipe=%08x\n",
-	       ctx->idx, tag,
-	       DPU_REG_READ(c, CTL_SW_RESET),
-	       DPU_REG_READ(c, CTL_SW_RESET_OVERRIDE),
-	       DPU_REG_READ(c, CTL_STATUS),
-	       DPU_REG_READ(c, CTL_TOP),
-	       DPU_REG_READ(c, CTL_FLUSH),
-	       DPU_REG_READ(c, CTL_INTF_ACTIVE),
-	       DPU_REG_READ(c, CTL_INTF_MASTER),
-	       DPU_REG_READ(c, CTL_DSC_ACTIVE),
-	       DPU_REG_READ(c, CTL_MERGE_3D_ACTIVE),
-	       DPU_REG_READ(c, CTL_WB_ACTIVE),
-	       DPU_REG_READ(c, CTL_CWB_ACTIVE),
-	       DPU_REG_READ(c, CTL_CDM_ACTIVE),
-	       DPU_REG_READ(c, CTL_FETCH_PIPE_ACTIVE),
-	       DPU_REG_READ(c, CTL_PIPE_ACTIVE));
-	pr_err("GARNET-DBG ctl%d %s: layer=%08x ext=%08x lactive=%08x flushsub[intf=%08x dsc=%08x merge3d=%08x cdm=%08x periph=%08x]\n",
-	       ctx->idx, tag,
-	       DPU_REG_READ(c, CTL_LAYER(lm)),
-	       DPU_REG_READ(c, CTL_LAYER_EXT(lm)),
-	       DPU_REG_READ(c, CTL_LAYER_ACTIVE),
-	       DPU_REG_READ(c, CTL_INTF_FLUSH),
-	       DPU_REG_READ(c, CTL_DSC_FLUSH),
-	       DPU_REG_READ(c, CTL_MERGE_3D_FLUSH),
-	       DPU_REG_READ(c, CTL_CDM_FLUSH),
-	       DPU_REG_READ(c, CTL_PERIPH_FLUSH));
-}
-
-/*
- * GARNET debug: write a flush mask (optionally preceded by the DSC sub-block
- * flush register write, like the real path does) and report what the ctl path
- * thinks of it.  Returns true if the ctl path requested a reset and the reset
- * did not complete by itself; the stuck reset is cleared again before
- * returning so the next test starts from a clean state.
- *
- * Runs with the encoder spinlock held, so no sleeping.
- */
-static bool dpu_hw_ctl_dbg_probe_once(struct dpu_hw_ctl *ctx, const char *what,
-				      u32 mask, bool sub_flush)
-{
-	u32 imm, late;
-
-	if (sub_flush && (mask & BIT(DSC_IDX)))
-		DPU_REG_WRITE(&ctx->hw, CTL_DSC_FLUSH,
-			      ctx->pending_dsc_flush_mask);
-
-	DPU_REG_WRITE(&ctx->hw, CTL_FLUSH, mask);
-	imm = DPU_REG_READ(&ctx->hw, CTL_SW_RESET);
-	udelay(20);
-	late = DPU_REG_READ(&ctx->hw, CTL_SW_RESET);
-
-	pr_err("GARNET-DBG ctl%d probe %s mask=%08x: swreset now=%08x late=%08x flush=%08x dsc_active=%08x\n",
-	       ctx->idx, what, mask, imm, late,
-	       DPU_REG_READ(&ctx->hw, CTL_FLUSH),
-	       DPU_REG_READ(&ctx->hw, CTL_DSC_ACTIVE));
-
-	if (!(late & 0x1))
-		return false;
-
-	DPU_REG_WRITE(&ctx->hw, CTL_SW_RESET_OVERRIDE, 0x1);
-	udelay(200);
-	DPU_REG_WRITE(&ctx->hw, CTL_SW_RESET_OVERRIDE, 0x0);
-	udelay(200);
-
-	return true;
-}
-
-/*
- * GARNET debug: find out which flush bit makes the ctl path request a reset.
- * Runs exactly once, from trigger_flush_v1().
- *
- * 1. replay the exact real sequence (DSC sub-block flush + CTL_FLUSH) to check
- *    that the reset reproduces here at all;
- * 2. replay CTL_FLUSH alone (no CTL_DSC_FLUSH write);
- * 3. removal tests: write the real mask with one candidate bit cleared.  A
- *    single bit on its own can be invalid and give a false positive, so the
- *    bit is removed from the real mask instead of written alone.
- */
-static void dpu_hw_ctl_dbg_probe_flush(struct dpu_hw_ctl *ctx)
-{
-	static const struct {
-		const char *name;
-		const char *label;
-		u32 bit;
-	} drop[] = {
-		{ "dsc0", "without-dsc0", BIT(DSC_IDX) },
-		{ "lm0", "without-lm0", BIT(6) },
-		{ "dma0", "without-dma0", BIT(11) },
-		{ "ctl-cfg", "without-ctl-cfg", CTL_FLUSH_MASK_CTL },
-	};
-	u32 full = ctx->pending_flush_mask;
-	u32 dsc_active;
-	int i;
-
-	if (ctx->dbg_probe_done)
-		return;
-	ctx->dbg_probe_done = 1;
-
-	pr_err("GARNET-DBG ctl%d probe: full mask=%08x dsc_flush=%08x dsc_active=%08x\n",
-	       ctx->idx, full, ctx->pending_dsc_flush_mask,
-	       DPU_REG_READ(&ctx->hw, CTL_DSC_ACTIVE));
-	if (!full) {
-		dpu_hw_ctl_dbg_dump(ctx, "probe-post");
-		return;
-	}
-
-	dpu_hw_ctl_dbg_probe_once(ctx, "real-sequence", full, true);
-	dpu_hw_ctl_dbg_probe_once(ctx, "no-sublk-flush", full, false);
-
-	for (i = 0; i < ARRAY_SIZE(drop); i++) {
-		if (!(full & drop[i].bit))
-			continue;
-
-		if (!dpu_hw_ctl_dbg_probe_once(ctx, drop[i].label,
-					      full & ~drop[i].bit, true)) {
-			pr_err("GARNET-DBG ctl%d probe: %s is the trigger\n",
-			       ctx->idx, drop[i].name);
-			break;
-		}
-	}
-
-	/*
-	 * Last: is it the DSC "active" bitmap that the ctl path objects to?
-	 * Mainline programs CTL_DSC_ACTIVE on the enable path, downstream
-	 * only does so from the DCE update path.
-	 */
-	dsc_active = DPU_REG_READ(&ctx->hw, CTL_DSC_ACTIVE);
-	DPU_REG_WRITE(&ctx->hw, CTL_DSC_ACTIVE, 0);
-	dpu_hw_ctl_dbg_probe_once(ctx, "no-dsc-active", full, true);
-	DPU_REG_WRITE(&ctx->hw, CTL_DSC_ACTIVE, dsc_active);
-
-	dpu_hw_ctl_dbg_dump(ctx, "probe-post");
-}
-
 static u32 dpu_hw_ctl_poll_reset_status(struct dpu_hw_ctl *ctx, u32 timeout_us)
 {
 	struct dpu_hw_blk_reg_map *c = &ctx->hw;
@@ -617,37 +435,18 @@ static u32 dpu_hw_ctl_poll_reset_status(struct dpu_hw_ctl *ctx, u32 timeout_us)
 static int dpu_hw_ctl_reset_control(struct dpu_hw_ctl *ctx)
 {
 	struct dpu_hw_blk_reg_map *c = &ctx->hw;
-	u32 before, after;
 
 	pr_debug("issuing hw ctl reset for ctl:%d\n", ctx->idx);
-	before = DPU_REG_READ(c, CTL_SW_RESET);
 	DPU_REG_WRITE(c, CTL_SW_RESET, 0x1);
-	after = DPU_REG_READ(c, CTL_SW_RESET);
-	pr_err("GARNET-DBG ctl%d: sw reset from %pS, before=%x after=%x override=%x\n",
-	       ctx->idx, __builtin_return_address(0), before, after,
-	       DPU_REG_READ(c, CTL_SW_RESET_OVERRIDE));
 	if (dpu_hw_ctl_poll_reset_status(ctx, DPU_REG_RESET_TIMEOUT_US))
 		return -EINVAL;
 
 	return 0;
 }
 
-static void dpu_hw_ctl_hard_reset(struct dpu_hw_ctl *ctx, bool reset)
-{
-	DPU_REG_WRITE(&ctx->hw, CTL_SW_RESET_OVERRIDE, reset ? 0x1 : 0x0);
-	if (reset)
-		usleep_range(2000, 2500);
-}
-
-static bool dpu_hw_ctl_is_reset_pending(struct dpu_hw_ctl *ctx)
-{
-	return !!(DPU_REG_READ(&ctx->hw, CTL_SW_RESET) & 0x1);
-}
-
 static int dpu_hw_ctl_wait_reset_status(struct dpu_hw_ctl *ctx)
 {
 	struct dpu_hw_blk_reg_map *c = &ctx->hw;
-	ktime_t start;
 	u32 status;
 
 	status = DPU_REG_READ(c, CTL_SW_RESET);
@@ -655,22 +454,11 @@ static int dpu_hw_ctl_wait_reset_status(struct dpu_hw_ctl *ctx)
 	if (!status)
 		return 0;
 
-	pr_err("GARNET-DBG ctl%d: wait enter swreset=%x override=%x top=%08x\n",
-	       ctx->idx, status, DPU_REG_READ(c, CTL_SW_RESET_OVERRIDE),
-	       DPU_REG_READ(c, CTL_TOP));
-	dpu_hw_ctl_dbg_dump(ctx, "reset-pending");
-
-	start = ktime_get();
-	if (dpu_hw_ctl_poll_reset_status(ctx, DPU_REG_WAIT_RESET_TIMEOUT_US)) {
-		pr_err("GARNET-DBG ctl%d: hw recovery incomplete after %lld us swreset=%x override=%x\n",
-		       ctx->idx, ktime_to_us(ktime_sub(ktime_get(), start)),
-		       DPU_REG_READ(c, CTL_SW_RESET),
-		       DPU_REG_READ(c, CTL_SW_RESET_OVERRIDE));
+	pr_debug("hw ctl reset is set for ctl:%d\n", ctx->idx);
+	if (dpu_hw_ctl_poll_reset_status(ctx, DPU_REG_RESET_TIMEOUT_US)) {
+		pr_err("hw recovery is not complete for ctl:%d\n", ctx->idx);
 		return -EINVAL;
 	}
-
-	pr_err("GARNET-DBG ctl%d: hw recovery OK after %lld us\n",
-	       ctx->idx, ktime_to_us(ktime_sub(ktime_get(), start)));
 
 	return 0;
 }
@@ -816,7 +604,7 @@ static void dpu_hw_ctl_intf_cfg_v1(struct dpu_hw_ctl *ctx,
 	if (cfg->cwb)
 		cwb_active |= cfg->cwb;
 
-	if (cfg->dsc && !dpu_dsc_no_active)
+	if (cfg->dsc)
 		dsc_active |= cfg->dsc;
 
 	if (cfg->merge_3d)
@@ -1060,10 +848,7 @@ struct dpu_hw_ctl *dpu_hw_ctl_init(struct drm_device *dev,
 	c->ops.is_started = dpu_hw_ctl_is_started;
 	c->ops.trigger_pending = dpu_hw_ctl_trigger_pending;
 	c->ops.reset = dpu_hw_ctl_reset_control;
-	c->ops.hard_reset = dpu_hw_ctl_hard_reset;
-	c->ops.is_reset_pending = dpu_hw_ctl_is_reset_pending;
 	c->ops.wait_reset_status = dpu_hw_ctl_wait_reset_status;
-	c->ops.dbg_dump = dpu_hw_ctl_dbg_dump;
 	if (mdss_ver->core_major_ver < 12) {
 		c->ops.clear_all_blendstages = dpu_hw_ctl_clear_all_blendstages;
 		c->ops.setup_blendstage = dpu_hw_ctl_setup_blendstage;

@@ -246,24 +246,6 @@ struct dpu_hw_ctl_ops {
 	int (*reset)(struct dpu_hw_ctl *c);
 
 	/**
-	 * @hard_reset: force the ctl path into or out of reset
-	 * @ctx: ctl path ctx pointer
-	 * @reset: true to force the ctl path into reset, false to release it
-	 *
-	 * This toggles CTL_SW_RESET_OVERRIDE, which resets the ctl path
-	 * regardless of the state of the hw initiated reset state machine.
-	 * The caller must reprogram the ctl path while it is held in reset.
-	 */
-	void (*hard_reset)(struct dpu_hw_ctl *ctx, bool reset);
-
-	/**
-	 * @is_reset_pending: check if the hw initiated ctl reset is pending
-	 * @ctx: ctl path ctx pointer
-	 * Returns: true if the ctl reset status bit is still set
-	 */
-	bool (*is_reset_pending)(struct dpu_hw_ctl *ctx);
-
-	/**
 	 * @wait_reset_status: checks ctl reset status
 	 * @ctx       : ctl path ctx pointer
 	 *
@@ -273,13 +255,6 @@ struct dpu_hw_ctl_ops {
 	 * Returns: 0 on success or -error if reset incomplete within interval
 	 */
 	int (*wait_reset_status)(struct dpu_hw_ctl *ctx);
-
-	/**
-	 * @dbg_dump: GARNET debug helper, dump the interesting ctl registers
-	 * @ctx: ctl path ctx pointer
-	 * @tag: short marker printed with the dump
-	 */
-	void (*dbg_dump)(struct dpu_hw_ctl *ctx, const char *tag);
 
 	/**
 	 * @clear_all_blendstages: Set all blend stages to disabled
@@ -361,11 +336,6 @@ struct dpu_hw_ctl {
 	u32 pending_cdm_flush_mask;
 
 	const struct dpu_mdss_version *mdss_ver;
-
-	/* GARNET debug: limit register dumps to the first few occurrences */
-	u32 dbg_count;
-	u32 dbg_dump_count;
-	u32 dbg_probe_done;
 
 	/* ops */
 	struct dpu_hw_ctl_ops ops;

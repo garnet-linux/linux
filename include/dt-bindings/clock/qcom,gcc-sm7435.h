@@ -59,7 +59,6 @@
 #define GCC_QUPV3_WRAP_1_M_AHB_CLK		21
 #define GCC_QUPV3_WRAP_1_S_AHB_CLK		22
 #define GCC_EUSB3_0_CLKREF_EN			23
-#define GCC_DISP_HF_AXI_CLK			24
 
 /* GCC resets */
 #define GCC_UFS_PHY_BCR				0

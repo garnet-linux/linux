@@ -14,7 +14,6 @@
 
 #include <drm/display/drm_dsc_helper.h>
 #include <drm/drm_managed.h>
-#include <linux/delay.h>
 
 #define DPU_DEBUG_VIDENC(e, fmt, ...) DPU_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->parent ? \
@@ -333,39 +332,6 @@ static void dpu_encoder_phys_vid_setup_timing_engine(
 	programmable_fetch_config(phys_enc, &timing_params);
 }
 
-/*
- * Rewrite only the ctl_path interface configuration.  The ctl path registers
- * are wiped out when the hardware (or the recovery code) resets the ctl
- * block, while the INTF timing engine and its registers stay untouched.
- */
-static void dpu_encoder_phys_vid_restore_intf_cfg(
-		struct dpu_encoder_phys *phys_enc)
-{
-	struct dpu_hw_intf_cfg intf_cfg = { 0 };
-	unsigned long lock_flags;
-
-	if (!phys_enc->hw_ctl || !phys_enc->hw_ctl->ops.setup_intf_cfg)
-		return;
-
-	if (phys_enc->hw_cdm)
-		intf_cfg.cdm = phys_enc->hw_cdm->idx;
-	intf_cfg.intf = phys_enc->hw_intf->idx;
-	if (phys_enc->split_role == ENC_ROLE_MASTER)
-		intf_cfg.intf_master = phys_enc->hw_intf->idx;
-	intf_cfg.intf_mode_sel = DPU_CTL_MODE_SEL_VID;
-	intf_cfg.stream_sel = 0; /* Don't care value for video mode */
-	intf_cfg.mode_3d = dpu_encoder_helper_get_3d_blend_mode(phys_enc);
-	intf_cfg.dsc = dpu_encoder_helper_get_dsc(phys_enc);
-	if (intf_cfg.mode_3d && phys_enc->hw_pp->merge_3d)
-		intf_cfg.merge_3d = phys_enc->hw_pp->merge_3d->idx;
-
-	spin_lock_irqsave(phys_enc->enc_spinlock, lock_flags);
-	phys_enc->hw_ctl->ops.setup_intf_cfg(phys_enc->hw_ctl, &intf_cfg);
-	spin_unlock_irqrestore(phys_enc->enc_spinlock, lock_flags);
-
-	DPU_DEBUG_VIDENC(phys_enc, "restored ctl intf cfg\n");
-}
-
 static void dpu_encoder_phys_vid_vblank_irq(void *arg)
 {
 	struct dpu_encoder_phys *phys_enc = arg;
@@ -576,18 +542,7 @@ static int dpu_encoder_phys_vid_wait_for_commit_done(
 		(hw_ctl->ops.get_flush_register(hw_ctl) == 0),
 		msecs_to_jiffies(50));
 	if (ret <= 0) {
-		struct dpu_hw_blk_reg_map *intf_hw = &phys_enc->hw_intf->hw;
-
 		DPU_ERROR("vblank timeout: %x\n", hw_ctl->ops.get_flush_register(hw_ctl));
-		pr_err("GARNET-DBG intf%d: status=%x timing_en=%x config=%x intf_cfg2=%x frame_cnt=%x line_cnt=%x frame_line_en=%x\n",
-		       phys_enc->hw_intf->idx - INTF_0,
-		       DPU_REG_READ(intf_hw, 0x26C),
-		       DPU_REG_READ(intf_hw, 0x000),
-		       DPU_REG_READ(intf_hw, 0x004),
-		       DPU_REG_READ(intf_hw, 0x060),
-		       DPU_REG_READ(intf_hw, 0x0AC),
-		       DPU_REG_READ(intf_hw, 0x0B0),
-		       DPU_REG_READ(intf_hw, 0x0A8));
 		return -ETIMEDOUT;
 	}
 
@@ -616,37 +571,8 @@ static void dpu_encoder_phys_vid_prepare_for_kickoff(
 		DPU_ERROR_VIDENC(phys_enc, "ctl %d reset failure: %d\n",
 				ctl->idx, rc);
 		msm_disp_snapshot_state(drm_enc->dev);
-		/*
-		 * The ctl path recovery (hard reset + reprogram) is done at
-		 * the crtc level, before this point of the commit.  Do not
-		 * write CTL_SW_RESET or pulse the override here: the ctl path
-		 * has already been reprogrammed by dpu_crtc_commit_kickoff()
-		 * and another reset would throw that configuration away.
-		 */
-		if (phys_enc->hw_intf) {
-			struct dpu_hw_blk_reg_map *ic = &phys_enc->hw_intf->hw;
-			struct dpu_hw_blk_reg_map *cc = &ctl->hw;
-			int i;
-
-			for (i = 0; i < 5; i++) {
-				pr_err("GARNET-DBG[%d]: intf en=%x frame=%u line=%u | ctl flush=%08x start=%x swreset=%x\n",
-				       i,
-				       DPU_REG_READ(ic, 0x000),
-				       DPU_REG_READ(ic, 0x0ac),
-				       DPU_REG_READ(ic, 0x0b0),
-				       DPU_REG_READ(cc, 0x018),
-				       DPU_REG_READ(cc, 0x01c),
-				       DPU_REG_READ(cc, 0x030));
-				msleep(3);
-			}
-		}
-		/*
-		 * Don't unregister the vsync irq here.  The hw initiated reset
-		 * is only polled for DPU_REG_RESET_TIMEOUT_US (2 ms), which is
-		 * shorter than one frame at 120 Hz, and without the vsync irq
-		 * nothing can ever observe the reset finishing: every later
-		 * commit then times out waiting for vblank.
-		 */
+		dpu_core_irq_unregister_callback(phys_enc->dpu_kms,
+				phys_enc->irq[INTR_IDX_VSYNC]);
 	}
 }
 
@@ -823,7 +749,6 @@ static void dpu_encoder_phys_vid_init_ops(struct dpu_encoder_phys_ops *ops)
 	ops->irq_disable = dpu_encoder_phys_vid_irq_disable;
 	ops->prepare_for_kickoff = dpu_encoder_phys_vid_prepare_for_kickoff;
 	ops->handle_post_kickoff = dpu_encoder_phys_vid_handle_post_kickoff;
-	ops->restore_intf_cfg = dpu_encoder_phys_vid_restore_intf_cfg;
 	ops->needs_single_flush = dpu_encoder_phys_vid_needs_single_flush;
 	ops->get_line_count = dpu_encoder_phys_vid_get_line_count;
 	ops->get_frame_count = dpu_encoder_phys_vid_get_frame_count;
