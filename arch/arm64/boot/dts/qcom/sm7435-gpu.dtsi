@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include <dt-bindings/clock/qcom,gcc-sm7435.h>
+#include <dt-bindings/clock/qcom,sm7435-gpucc.h>
+#include <dt-bindings/clock/qcom,rpmh.h>
+/*
+ * Adreno 710 skeleton. Disabled until gpucc, the interconnect provider
+ * and the adreno SMMU exist in sm7435.dtsi. TODO: clocks, power-domains,
+ * interconnects, iommus, interrupts, OPP tables (take them from the
+ * downstream qcom,kgsl-3d0 node).
+ */
+
+&soc {
+	gpu: gpu@3d00000 {
+		compatible = "qcom,adreno";
+		reg = <0x0 0x03d00000 0x0 0x40000>,
+		      <0x0 0x03d9e000 0x0 0x1000>,
+		      <0x0 0x03d61000 0x0 0x800>;
+		reg-names = "kgsl_3d0_reg_memory", "cx_mem", "cx_dbgc";
+		status = "disabled";
+
+		zap-shader {
+			memory-region = <&gpu_microcode_mem>;
+		};
+	};
+
+	gmu: gmu@3d6a000 {
+		compatible = "qcom,adreno-gmu";
+		reg = <0x0 0x03d6a000 0x0 0x35000>,
+		      <0x0 0x03d50000 0x0 0x10000>,
+		      <0x0 0x0b290000 0x0 0x10000>;
+		reg-names = "gmu", "rscc", "gmu_pdc";
+		status = "disabled";
+	};
+};
+
+&soc {
+	gpucc: clock-controller@3d90000 {
+		compatible = "qcom,sm7435-gpucc";
+		reg = <0x0 0x03d90000 0x0 0xa000>;
+		clocks = <&rpmhcc RPMH_CXO_CLK>,
+			 <&gcc GCC_GPLL0>,
+			 <&gcc GCC_GPLL0_OUT_EVEN>;
+		#clock-cells = <1>;
+		#reset-cells = <1>;
+		#power-domain-cells = <1>;
+	};
+};

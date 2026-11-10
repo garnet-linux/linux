@@ -17,6 +17,7 @@
 
 #include "sm7435.dtsi"
 #include "pm6150l.dtsi"
+#include "sm7435-gpu.dtsi"
 
 / {
 	model = "Xiaomi Redmi Note 13 Pro 5G";
@@ -272,4 +273,16 @@
 		touchscreen-size-x = <1220>;
 		touchscreen-size-y = <2712>;
 	};
+};
+
+&gpu {
+	status = "disabled";
+
+	zap-shader {
+		firmware-name = "qcom/sm7435/garnet/a710_zap.mbn";
+	};
+};
+
+&gmu {
+	status = "disabled";
 };
