@@ -1167,6 +1167,15 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 
 	pr_info("dpu hardware revision:0x%x\n", core_rev);
 
+	/* GARNET-DBG: raw ctl0/intf1 state before we touch anything */
+	pr_err("GARNET-DBG init-pre: intf1 en=%x frame=%u | ctl0 swreset=%x override=%x start=%x top=%08x\n",
+	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x000),
+	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x0ac),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x060),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x01c),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x014));
+
 	dpu_kms->catalog = of_device_get_match_data(dev->dev);
 	if (!dpu_kms->catalog) {
 		DPU_ERROR("device config not known!\n");
@@ -1276,6 +1285,35 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
 	if (rc) {
 		DPU_ERROR("modeset init failed: %d\n", rc);
 		goto err_pm_put;
+	}
+
+	/* GARNET-DBG: raw ctl0/intf1 state after full hw init */
+	pr_err("GARNET-DBG init-post: intf1 en=%x frame=%u | ctl0 swreset=%x override=%x start=%x top=%08x\n",
+	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x000),
+	       readl_relaxed(dpu_kms->mmio + 0x35000 + 0x0ac),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x060),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x01c),
+	       readl_relaxed(dpu_kms->mmio + 0x15000 + 0x014));
+
+	if (readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030) & 0x1) {
+		u32 v;
+		int i;
+
+		pr_err("GARNET-DBG: ctl0 already stuck in reset at hw_init, override pulse\n");
+		writel_relaxed(0x1, dpu_kms->mmio + 0x15000 + 0x060);
+		usleep_range(2000, 2500);
+		writel_relaxed(0x0, dpu_kms->mmio + 0x15000 + 0x060);
+
+		v = 1;
+		for (i = 0; i < 2000; i++) {
+			v = readl_relaxed(dpu_kms->mmio + 0x15000 + 0x030) & 0x1;
+			if (!v)
+				break;
+			usleep_range(50, 100);
+		}
+		pr_err("GARNET-DBG: ctl0 after hw_init override swreset=%x (waited %d us)\n",
+		       v, i * 50);
 	}
 
 	dpu_vbif_init_memtypes(dpu_kms);

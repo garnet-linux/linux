@@ -1077,6 +1077,104 @@ static int dpu_crtc_kickoff_clone_mode(struct drm_crtc *crtc)
 }
 
 /**
+ * dpu_crtc_recover_ctl - recover a stuck hw initiated ctl reset
+ * @crtc: Pointer to drm crtc object
+ *
+ * The ctl path can reset itself when it detects an error.  On this platform
+ * the resulting reset request stays set forever, and releasing it with
+ * CTL_SW_RESET_OVERRIDE alone leaves the ctl path without any configuration,
+ * which immediately triggers another reset.  Mirror downstream
+ * sde_crtc_reset_hw(): keep the ctl path in reset while the layer/interface
+ * configuration is rewritten, then release it.
+ *
+ * Returns: true if the ctl path was hard reset and reprogrammed
+ */
+static bool dpu_crtc_recover_ctl(struct drm_crtc *crtc)
+{
+	struct dpu_crtc_state *cstate = to_dpu_crtc_state(crtc->state);
+	struct dpu_hw_ctl *ctl;
+	struct drm_encoder *encoder;
+	bool pending = false;
+	int i;
+
+	for (i = 0; i < cstate->num_mixers; i++) {
+		ctl = cstate->mixers[i].lm_ctl;
+		if (ctl && ctl->ops.is_reset_pending && ctl->ops.hard_reset &&
+		    ctl->ops.is_reset_pending(ctl)) {
+			pending = true;
+			break;
+		}
+	}
+
+	if (!pending)
+		return false;
+
+	pr_err("GARNET-DBG crtc%d: ctl reset pending, forcing hard reset\n",
+	       crtc->base.id);
+
+	ctl = cstate->mixers[0].lm_ctl;
+	if (ctl && ctl->ops.dbg_dump)
+		ctl->ops.dbg_dump(ctl, "recover-pre");
+
+	/*
+	 * The plain sw reset is what downstream tries first, and it is the only
+	 * thing that actually resets the ctl path state machine.  Try it before
+	 * falling back to the override dance.
+	 */
+	if (ctl && ctl->ops.reset && ctl->ops.is_reset_pending) {
+		int rc = ctl->ops.reset(ctl);
+
+		pr_err("GARNET-DBG crtc%d: plain sw reset rc=%d swreset=%d\n",
+		       crtc->base.id, rc,
+		       ctl->ops.is_reset_pending(ctl) ? 1 : 0);
+		if (!rc) {
+			/* the reset cleared the ctl config, rewrite it */
+			_dpu_crtc_blend_setup(crtc);
+			drm_for_each_encoder_mask(encoder, crtc->dev,
+						  crtc->state->encoder_mask)
+				dpu_encoder_restore_intf_cfg(encoder);
+			goto done;
+		}
+	}
+
+	/* force all ctl paths of this crtc into reset at the same time */
+	for (i = 0; i < cstate->num_mixers; i++) {
+		ctl = cstate->mixers[i].lm_ctl;
+		if (ctl && ctl->ops.hard_reset)
+			ctl->ops.hard_reset(ctl, true);
+	}
+
+	/* reprogram the whole ctl path while it is held in reset */
+	_dpu_crtc_blend_setup(crtc);
+
+	drm_for_each_encoder_mask(encoder, crtc->dev,
+				  crtc->state->encoder_mask)
+		dpu_encoder_restore_intf_cfg(encoder);
+
+	/* take the ctl paths out of reset again */
+	for (i = cstate->num_mixers - 1; i >= 0; i--) {
+		ctl = cstate->mixers[i].lm_ctl;
+		if (ctl && ctl->ops.hard_reset)
+			ctl->ops.hard_reset(ctl, false);
+	}
+
+done:
+	for (i = 0; i < cstate->num_mixers; i++) {
+		ctl = cstate->mixers[i].lm_ctl;
+		if (ctl && ctl->ops.is_reset_pending &&
+		    ctl->ops.is_reset_pending(ctl))
+			pr_err("GARNET-DBG crtc%d: ctl%d still in reset after recovery\n",
+			       crtc->base.id, ctl->idx - CTL_0);
+	}
+
+	ctl = cstate->mixers[0].lm_ctl;
+	if (ctl && ctl->ops.dbg_dump)
+		ctl->ops.dbg_dump(ctl, "recover-post");
+
+	return true;
+}
+
+/**
  * dpu_crtc_commit_kickoff - trigger kickoff of the commit for this crtc
  * @crtc: Pointer to drm crtc object
  */
@@ -1104,6 +1202,12 @@ void dpu_crtc_commit_kickoff(struct drm_crtc *crtc)
 			goto end;
 		}
 	}
+
+	/*
+	 * The hw initiated ctl reset might have triggered during the last
+	 * frame.  Recover it before the ctl path is kicked off again.
+	 */
+	dpu_crtc_recover_ctl(crtc);
 
 	if (drm_crtc_in_clone_mode(crtc->state)) {
 		if (dpu_crtc_kickoff_clone_mode(crtc))

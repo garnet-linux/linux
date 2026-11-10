@@ -461,3 +461,403 @@ only add the `max_freq` half if it is missing.
    votes). Do not change several things at once — this failure has at least
    three independent contributors (timeout, possible stuck override, DSI DMA
    fault) and they must be separated.
+
+---
+
+## 9. Live-boot results (kernel #63) and the recovery that was applied
+
+### 9.1 What the live log proved
+
+Boot with the 100 ms wait and the extra logging (patched tree, `dpu_hw_ctl.c`,
+`dpu_vbif.c`, `dsi_host.c`, `dpu_kms.c`):
+
+```
+[0.340] dpu hardware revision:0x80030000
+[0.595] panel on: 1220x2712, DSC 610x12 ...
+[0.653] arm-smmu ... Unhandled context fault: fsr=0x402, iova=0x00000000,
+        fsynr=0x6e0003, cbfrsynra=0x800, cb=7
+[0.656] GARNET-DBG ctl1: wait enter swreset=1 override=0 top=f0000000
+[0.756] GARNET-DBG ctl1: hw recovery incomplete after 100015 us
+        swreset=1 override=0
+```
+
+Then, for the whole 37 s of the captured log:
+
+* `swreset=1 override=0` at **every** retry. `wait_reset_status()` therefore
+  observes a *hardware-held* CTL reset, not a timeout that is too short.
+  → **H1 (2 ms timeout) is disproven.**
+* `override=0` never changes, so nothing has latched the hard-reset override.
+  → **H2 (stuck override bit) is disproven.** (It also means the override is a
+  usable escape hatch, see 9.2.)
+* `intf en=1 frame=13..4380 line=...` — the INTF_1 timing engine keeps scanning
+  at ~120 Hz and the vsync IRQ fires (`core_irq: IRQ=[0,27] count:4761`).
+  The DSI video stream and the panel are alive; only the CTL path is held.
+* `CTL_START` reads 0 and `CTL_FLUSH` accumulates `0x00420840` at every failed
+  commit — writes reach the CTL, but it never leaves reset, so flush is never
+  consumed.
+* DSI command DMA is healthy (`dma_base=0x1000 rb_base=0x1000
+  cmd_dma_ctrl=0x04000000`, all transfers complete with
+  `msm.dsi_dma_from_fb=0`), so the DSI cmd-DMA hypotheses are dead.
+* `GARNET-DBG: mdp core opp requested=608000000 actual=608000000` — clock/OPP
+  hypothesis is dead.
+* VBIF reports `pnd 0x2 src 0x2` once, right after the first failed commit.
+  Bit 1 is XIN 1, which is **SSPP_DMA0** (`xin_id = 1` in
+  `catalog/dpu_8_3_sm7435.h`), i.e. the primary plane pipe.
+* The single `iova=0` SMMU fault happens ~3 ms *before* the first
+  `wait_reset_status()`. On DPU 8.3 the hardware itself initiates a CTL reset
+  when the pipe reports a fatal bus/translation error and sets
+  `CTL_SW_RESET[0]`; that is exactly the condition the mainline
+  `wait_reset_status` op was written for.
+
+So the chain is:
+
+```
+something fetches from IOVA 0 on DMA0
+  -> display SMMU translation fault (iova=0, fsr=0x402, SID 0x800)
+  -> hw-initiated CTL0 reset, CTL_SW_RESET[0] = 1
+  -> mainline only polls that bit and gives up; nothing forces the CTL back out
+  -> every commit fails, black screen while INTF keeps scanning
+```
+
+Downstream does not just give up at that point: `sde_crtc_reset_hw()`
+(`sde_crtc.c:4000`) writes `CTL_SW_RESET_OVERRIDE` to force the whole ctl path
+into reset and then release it (`sde_hw_ctl_hard_reset()`,
+`sde_hw_ctl.c:805`), re-programs a safe "border colour only" pipeline and
+kicks off again. Mainline has the same `CTL_SW_RESET_OVERRIDE 0x060` define and
+the same register semantics, but no recovery.
+
+### 9.2 Implemented recovery
+
+1. `dpu_hw_ctl.c: dpu_hw_ctl_wait_reset_status()` — after the normal 100 ms
+   poll fails, do the downstream hard-reset sequence:
+
+   ```c
+   DPU_REG_WRITE(c, CTL_SW_RESET_OVERRIDE, 0x1);
+   usleep_range(2000, 2500);
+   DPU_REG_WRITE(c, CTL_SW_RESET_OVERRIDE, 0x0);
+   if (!dpu_hw_ctl_poll_reset_status(ctx, DPU_REG_WAIT_RESET_TIMEOUT_US))
+           return 0;   /* reset released, kickoff may proceed */
+   return -EINVAL;
+   ```
+
+   The layer/plane configuration for the frame is already written by
+   `dpu_crtc_atomic_flush()` before `prepare_for_kickoff()` runs
+   (`dpu_crtc.c:1118`), and the flush/start happen right after it, so releasing
+   the reset here is enough to let the pending frame go out.
+
+2. `dpu_kms.c: dpu_kms_hw_init()` — raw read of `CTL0`/`INTF1` at
+   `init-pre` (right after the revision read, before any block init) and
+   `init-post` (after `_dpu_kms_drm_obj_init`), plus a one-shot override pulse
+   if `CTL_SW_RESET[0]` is *already* set during `hw_init`. `init-pre` tells us
+   definitively whether the bootloader handed over a CTL in reset.
+
+3. `dpu_hw_ctl.c: dpu_hw_ctl_reset_control()` now logs `before/after/override`
+   and the caller (`%pS`) for every software CTL reset, so a silent reset from
+   `dpu_encoder_helper_phys_cleanup()` can be attributed.
+
+4. `dpu_hw_sspp.c: dpu_hw_sspp_setup_sourceaddress()` logs the first 12 source
+   addresses per pipe/rectangle — this identifies the pipe that fetches IOVA 0
+   (expected: SSPP_DMA0, rectangle and address values).
+
+### 9.3 What to look for on the next boot
+
+```
+GARNET-DBG init-pre: ... ctl0 swreset=...
+GARNET-DBG init-post: ... ctl0 swreset=...
+GARNET-DBG sspp... addr ...
+GARNET-DBG ctl1: forcing reset override on/off
+GARNET-DBG ctl1: override released the stuck reset, swreset=1   <- success
+   -or-
+GARNET-DBG ctl1: override did not help, swreset=1 override=...
+```
+
+Outcomes:
+
+* `init-pre swreset=1` → the CTL was **already** stuck before the first commit,
+  i.e. the bootloader/`msm_mdss_reset()` hand-off leaves it asserted; the
+  `hw_init` pulse in item 2 is the real fix.
+* `init-pre swreset=0`, later `override released ...` → the hw-initiated reset
+  was caused by the IOVA-0 fetch; the recovery in item 1 releases it, and the
+  `sspp addr ...` line names the pipe that still needs its address fixed.
+* `override did not help` → a VBIF XIN is still blocked. Next step is to halt
+  the offending XIN (`dpu_vbif` `set_halt_ctrl`/`get_halt_ctrl`,
+  `dpu_hw_vbif.c:130`) around the override pulse, exactly like
+  `sde_plane_halt_requests()`, before releasing the CTL.
+
+## 10. Live boot 2 (`7.3.0-gafe8799cad00-dirty`): what the logs proved
+
+### 10.1 Confirmed by the new diagnostics
+
+* `init-pre` / `init-post`:
+  `intf1 en=0 frame=0 | ctl0 swreset=0 override=0 start=0 top=f0000000`.
+  The bootloader hands over a **clean** CTL: no reset is pending at `hw_init`
+  and the one-shot override pulse in `dpu_kms_hw_init()` never fires.
+  The `top=f0000000` is the normal `CTL_DEFAULT_GROUP_ID << 28`
+  (`dpu_hw_ctl.c:65`, written by `dpu_hw_ctl_intf_cfg_v1()`), not a fault.
+* `sspp9 rect0 addr 00002000 ...` — the primary plane (SSPP_DMA0, enum index
+  9, xin 1) is programmed with a valid IOVA. The single IOVA-0 SMMU fault is
+  **not** the primary plane.
+* Exactly one SMMU fault in the whole boot:
+  `arm-smmu 15000000.iommu: Unhandled context fault: fsr=0x402,
+  iova=0x0, cbfrsynra=0x800, cb=7` at `0.671809`, i.e. ~1 ms *before* the
+  first `sspp9` address write at `0.672899`. SID `0x800` is the DPU/SDE
+  stream (`sm7435.dtsi:649`), so a DPU client fetched IOVA 0 while its fetch
+  pipe was already active but its address had not been programmed yet.
+* Every commit after that:
+  ```
+  ctl1: wait enter swreset=1 override=0 top=f0000000
+  ctl1: hw recovery incomplete after 1000xx us swreset=1 override=0
+  ctl1: forcing reset override on/off
+  ctl1: override released the stuck reset, swreset=0
+  ```
+  The override pulse **does** release the stuck reset. But no
+  `GARNET-DBG ctl1: sw reset from ...` line ever appears, so software never
+  writes `CTL_SW_RESET` after `hw_init`: the reset is asserted by hardware.
+* The INTF keeps counting (`intf1 frame/line` advance during the 100 ms poll)
+  and the DSI command DMA is healthy (`cmd_dma_ctrl=0x4000000`,
+  `dma_base=0x1000`), so the DSI/timing engines are not the cause.
+* On the next commit `swreset=1` is back, with **no further SMMU fault**. The
+  recurrence is therefore not another IOVA-0 fetch; the ctl path is released
+  into a frame where it no longer has a valid configuration.
+
+### 10.2 Conclusion
+
+The old recovery released the reset *after* the frame config had already been
+written (`prepare_for_kickoff()` runs after `atomic_begin()`/`atomic_flush()`),
+so the ctl path came out of reset with its layer/interface registers wiped by
+the hard reset and immediately errored/reset again. This is a self-sustaining
+loop: reset -> release with empty config -> hardware reset -> reset.
+
+Downstream avoids this by holding `CTL_SW_RESET_OVERRIDE` across the blob
+reprogramming (`sde_crtc_reset_hw()`: `hard_reset(true)` ->
+`_sde_crtc_blend_setup()` -> `hard_reset(false)`).
+
+### 10.3 New fix in this tree
+
+1. `dpu_hw_ctl.h`/`dpu_hw_ctl.c`
+   * new `hard_reset(ctx, bool)` op -> `CTL_SW_RESET_OVERRIDE` (0x060),
+     with a ~2 ms hold while asserting, like `sde_hw_ctl_hard_reset()`;
+   * new `is_reset_pending(ctx)` op -> read `CTL_SW_RESET[0]`;
+   * `wait_reset_status()` is back to a pure wait (no side effects), so the
+     recovery decisions live in one place;
+   * `CTL_STATUS` (0x064) and the ctl layer/active registers are dumped
+     (`reset-pending`) plus `flush-pre/post` and `start-pre/post` notes, so the
+     exact point where hardware asserts the reset becomes visible.
+2. `dpu_crtc.c: dpu_crtc_recover_ctl()` — called from
+   `dpu_crtc_commit_kickoff()`, i.e. after the frame's plane/CTL writes and
+   right before prepare/kickoff. If `is_reset_pending()` is set for any CTL of
+   the crtc it:
+   1. asserts `hard_reset(true)` on every CTL of the crtc,
+   2. re-runs `_dpu_crtc_blend_setup()` (layers, active pipes, fetch pipes,
+      active LMs, blend stages),
+   3. calls the new `dpu_encoder_restore_intf_cfg()` for every encoder of the
+      crtc to rewrite `CTL_TOP`/`CTL_INTF_ACTIVE`/`CTL_INTF_MASTER`/DSC/CDM/
+      merge-3d (`dpu_encoder_phys_vid.c`), because the INTF config is only
+      written at enable time by `setup_timing_engine()`,
+   4. releases `hard_reset(false)` and re-checks `CTL_SW_RESET`.
+3. `dpu_encoder_phys_vid_prepare_for_kickoff()` no longer issues its own SW
+   reset on the error path; that would throw away the configuration the crtc
+   recovery just restored. It only reports and takes the snapshot.
+
+### 10.4 What to look for on the next boot
+
+```
+GARNET-DBG ctl1: flush-pre ... swreset=...
+GARNET-DBG ctl1: start-pre ... swreset=...
+GARNET-DBG crtc0: ctl reset pending, forcing hard reset
+GARNET-DBG ctl1 reset-pending: swreset=... status=... top=... intf=... fetch=... pipe=... layer=...
+```
+
+* `start-post swreset=0` and no `ctl reset pending` next frame -> the frame
+  was accepted by hardware, the recovery is not needed anymore; the display
+  should scan out. If the SMMU fault at IOVA 0 is the original trigger, it
+  must not come back (the plane address is written before file recovery).
+* `ctl reset pending` every commit, but `ctl1 still in reset after recovery`
+  never prints -> the hard reset + reprogram sequence works but some in-frame
+  error keeps triggering the reset; the `reset-pending` register dump then
+  names the offending fetch pipe/layer (`fetch`/`pipe`/`layer`/`intf`).
+
+---
+
+## 11. Live boot 4 (recovery active): the reset is asserted *by the flush*
+
+### 11.1 Observed [FACT]
+
+With `dpu_crtc_recover_ctl()` in place every commit looks like:
+
+```
+GARNET-DBG ctl1: flush-pre swreset=0 override=0 fetch=00000001 start=0
+GARNET-DBG ctl1: flush-post swreset=1 ...            <- once, at 14.234
+GARNET-DBG crtc0: ctl reset pending, forcing hard reset
+GARNET-DBG ... vblank timeout: 420840
+GARNET-DBG ... wait for commit done returned -110
+```
+
+* The recovery itself works: before every `flush-pre` the ctl path is out of
+  reset (`swreset=0`, `override=0`), so the previous hard reset + reprogram did
+  clear it.
+* The reset request comes back **inside `trigger_flush_v1()`**, between the
+  `flush-pre` read and the `flush-post` read, i.e. from the `CTL_FLUSH` write
+  (or from the per-block flush registers written just before it).
+* `CTL_FLUSH` then reads back the written mask `0x420840` for the whole 50 ms
+  `wait_for_commit_done()` poll: the frame is never fetched/acked.
+  Bits: 6 = LM_0, 11 = DMA0, 17 = `CTL_FLUSH_MASK_CTL`, 22 = DSC_0.
+* No SMMU fault this boot, so the IOVA-0 fault seen on boot 2 is not required
+  for the reset to appear.
+* Display still ends up black (one white flash).
+
+### 11.2 Why this points at a single flush bit [FACT + HYP]
+
+`CTL_SW_RESET[0]` is a *request* bit: software sets it in
+`sde_hw_ctl_reset_control()`, hardware sets it on an internal error, and the
+block clears it when the reset completes (~30 us downstream). Here it is set by
+hardware synchronously with the flush and never completes, so some block named
+by the flush mask is not in a state where it can ack the flush.
+The prime suspects, in mask order, are DSC_0 (`BIT(22)` — the panel really is
+DSC-compressed), the LM/CTL-config bits (`BIT(6)`/`BIT(17)`) and DMA0
+(`BIT(11)`).
+
+`CTL_DSC_ACTIVE` is written by mainline `dpu_hw_ctl_intf_cfg_v1()` while
+downstream `sde_hw_ctl_intf_cfg_v1()` never touches it on the enable path
+(only `sde_hw_ctl_reset_intf_cfg_v1()` does). The DSC *programming* itself
+(`dsc_config_1_2()` register values) matches downstream, so the suspicion is on
+the enable/active/bind side, not on the PPS values.
+
+### 11.3 Diagnostics added in this revision (one boot should settle it)
+
+1. `dpu_hw_ctl_dbg_probe_flush()` — runs once, on the first
+   `trigger_flush_v1()`, before the real flush. It does *removal* tests: it
+   writes the real pending mask with one candidate bit cleared
+   (`BIT(DSC_IDX)`, `BIT(6)`, `BIT(11)`, `CTL_FLUSH_MASK_CTL`), samples
+   `CTL_SW_RESET` immediately after the write (was a reset *requested*?) and
+   again 20-40 us later (did it complete by itself?). If the mask still resets
+   the ctl path, the stuck bit is cleared with the override pulse and the next
+   candidate is tested; the first removal that does **not** reset names the
+   trigger. Output:
+
+   ```
+   GARNET-DBG ctl1 probe: full mask=........
+   GARNET-DBG ctl1 probe without <name>(<bit>): swreset now=.. late=.. flush=..
+   GARNET-DBG ctl1 probe: <name> is the trigger
+   ```
+
+   A removal test is used (rather than writing single bits) because a partial
+   mask such as `BIT(6)` without `CTL_FLUSH_MASK_CTL` may be invalid on its own
+   and produce a false positive. If no removal is clean, the trigger is the
+   full combination or the per-block flush registers written just before
+   `CTL_FLUSH`, not a single bit.
+2. `dpu_hw_ctl_dbg_dump()` is now called as `recover-pre`/`recover-post`/
+   `reset-pending`/`probe-post` and also prints `CTL_FLUSH`,
+   `CTL_DSC_ACTIVE`, `CTL_MERGE_3D_ACTIVE`, `CTL_WB_ACTIVE`,
+   `CTL_CWB_ACTIVE`, `CTL_CDM_ACTIVE` and the per-block flush registers
+   (`CTL_INTF_FLUSH`, `CTL_DSC_FLUSH`, `CTL_MERGE_3D_FLUSH`, `CTL_CDM_FLUSH`,
+   `CTL_PERIPH_FLUSH`). Separate counters for notes (32) and dumps (12).
+3. `dpu_encoder_dsc_pipe_cfg()` prints a one-shot DSC readback after all DSC
+   ops ran: the PPS inputs (`mode`, `initial_lines`, slice/pic sizes, bpp/bpc,
+   chunk size, initial xmit delay) and `DSC_CTL`/`DSC_CFG`/`DSC_DATA_IN_SWAP`/
+   `DSC_CLK_CTRL`, `DSC_CMN_MAIN_CNF`, `ENC_DF_CTRL`, `DSC_MAIN_CONF`,
+   `DSC_PICTURE_SIZE`, `DSC_SLICE_SIZE`, `DSC_MISC_SIZE`, `DSC_HRD_DELAYS`,
+   `ENC_GENERAL_STATUS`, `ENC_HSLICE_STATUS`, `ENC_OUT_STATUS`,
+   `ENC_INT_STAT`.
+   Expected on a healthy setup: `DSC_CTL=0` (bound to PINGPONG_0),
+   `DSC_CFG=0x401` (encoder enable, 10 bpc, video mode), non-zero
+   `DSC_CMN_MAIN_CNF`/`ENC_DF_CTRL`, `ENC_OUT_STATUS` without error bits.
+4. On `wait_for_commit_done()` timeout the encoder now also dumps
+   `INTF_STATUS` (0x26C), `INTF_TIMING_ENGINE_EN` (0x000), `INTF_CONFIG`
+   (0x004), `INTF_CONFIG2` (0x060), `INTF_FRAME_COUNT` (0x0AC),
+   `INTF_LINE_COUNT` (0x0B0) and `INTF_FRAME_LINE_COUNT_EN` (0x0A8), to see
+   whether the timing engine is actually running (line/frame counter moving,
+   `timing_en=1`) while the flush is stuck.
+5. `dpu_crtc_recover_ctl()` now first tries the plain SW reset
+   (`ctl->ops.reset()`, i.e. `CTL_SW_RESET=1` + poll, exactly what downstream
+   `sde_crtc_reset_hw()` does and what it early-outs on when it succeeds) and
+   only falls back to the `CTL_SW_RESET_OVERRIDE` hold-and-reprogram dance if
+   that times out. `GARNET-DBG crtc0: plain sw reset rc=.. swreset=..` reports
+   which path was taken.
+
+### 11.4 Decision tree for the next boot
+
+* `plain sw reset rc=0` -> the reset state machine does complete when software
+  pokes it; keep that path (it is the downstream behaviour) and look at the
+  *next* reset request only.
+* probe stops at `dsc0` -> DSC flush cannot be acked. Next step: check the
+  `dscN regs` line. `cfg` bit 0 clear or `DSC_CTL != 0` -> DSC
+  programming/bind bug; then try the runtime switches described in 12.2.
+* probe stops at `lm0`/`ctl-config` -> the LM/blend-stage or CTL self-config
+  flush is invalid (mixer `sblk`/stage count, `CTL_LAYER*`/`CTL_TOP`), not DSC.
+* probe stops at `dma0` -> the SSPP fetch side (DMA0 xin 1, fetch pipe 0) is
+  the problem, likely the plane/QoS programming.
+* no probe triggers, but `flush-post swreset=1` again -> the trigger is the
+  full combination or one of the per-block flush registers written before
+  `CTL_FLUSH` (`CTL_DSC_FLUSH` is the only one written for this commit); read
+  the `flushsub[...]` fields in the dumps.
+
+
+---
+
+## 12. Boot 5: probe reworked, plus runtime switches
+
+### 12.1 What changed since 11.3 [FACT]
+
+* The one-shot probe now runs the **real sequence first** (write
+  `CTL_DSC_FLUSH` and then `CTL_FLUSH` with the full mask) and logs
+  `probe real-sequence ...`. If that does *not* reproduce the stuck reset,
+  the trigger is not the flush register write at all, and the whole theory
+  needs revisiting.
+* Then `probe no-sublk-flush ...` (only `CTL_FLUSH`, no `CTL_DSC_FLUSH`)
+  separates "the sub-block flush write" from "the CTL_FLUSH write".
+* Then the removal tests (`without-dsc0`, `without-lm0`, `without-dma0`,
+  `without-ctl-cfg`) and finally `no-dsc-active`.
+* The probe no longer sleeps: it runs inside `_dpu_encoder_kickoff_phys()`
+  which holds `enc_spinlock` with IRQs off, so it uses `udelay()` and a short
+  `CTL_SW_RESET_OVERRIDE` pulse to clear a stuck reset between tests.
+* Corrected earlier assumption: downstream *does* program `CTL_DSC_ACTIVE`,
+  but only from the DCE path (`_dce_dsc_setup_single()` ->
+  `update_intf_cfg(..., active)`), not from `sde_encoder_phys_vid_enable()`.
+  Mainline programs it from `dpu_hw_ctl_intf_cfg_v1()` on the enable path.
+  So the bitmap value is probably fine; the probe still tests it.
+* Also noted [FACT]: downstream writes the DSC flush bit only when the DSC
+  state is dirty (`_dce_dsc_is_dirty()` / `_dce_helper_flush_dsc()`), while
+  mainline re-runs `dpu_encoder_prep_dsc()` (full PPS rewrite **and** DSC
+  flush bit) on every commit. That is a real behavioural difference and is
+  now switchable at runtime.
+
+### 12.2 Runtime switches (kernel command line, no rebuild needed per test)
+
+Both are plain `module_param`s, so they can be set in the bootloader cmdline:
+
+| parameter | effect |
+|---|---|
+| `dpu.dsc_once=0` | restore the upstream behaviour: rewrite the DSC PPS and request a DSC flush on *every* kickoff. The default is now `1` (once per enable), matching downstream |
+| `dpu.dsc_no_active=1` | do not set `CTL_DSC_ACTIVE` from `dpu_hw_ctl_intf_cfg_v1()` |
+
+Suggested test order after the plain boot 5 (probe output first):
+
+1. plain boot (DSC configured once, like downstream) - if the reset is gone,
+   the per-frame DSC rewrite/flush was the trigger.
+2. `dpu.dsc_once=0` - if the reset *returns* only with this, that confirms it.
+3. `dpu.dsc_no_active=1` - if the reset is gone only with this, drop the
+   enable-path `CTL_DSC_ACTIVE` write and let the DSC bind path own it.
+
+### 12.3 What to look for
+
+```
+GARNET-DBG ctl0 probe: full mask=... dsc_flush=... dsc_active=...
+GARNET-DBG ctl0 probe real-sequence mask=...: swreset now=.. late=.. flush=.. dsc_active=..
+GARNET-DBG ctl0 probe no-sublk-flush mask=...: ...
+GARNET-DBG ctl0 probe without-dsc0 ... 
+GARNET-DBG ctl0 probe: <name> is the trigger
+GARNET-DBG ctl0 probe no-dsc-active mask=...: ...
+GARNET-DBG crtc0: plain sw reset rc=.. swreset=..
+GARNET-DBG ctl0 probe-post: ...
+GARNET-DBG intf1: status=.. timing_en=.. config=.. intf_cfg2=.. frame_cnt=.. line_cnt=.. frame_line_en=..
+```
+
+* `timing_en=0` on the timeout line would mean the INTF never started and the
+  whole ctl/blend path question is secondary.
+* `frame_cnt`/`line_cnt` moving means the timing engine runs and only the ctl
+  path is stuck.
+* `real-sequence` clean while the normal `flush-post` still shows
+  `swreset=1` would mean the reset comes from somewhere else entirely (e.g.
+  an INTF/DSI side error, or a late effect of the preceding SMMU/fetch
+  state), not from these register writes.
