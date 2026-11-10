@@ -318,7 +318,7 @@ static struct clk_branch gpu_cc_cx_snoc_dvm_clk = {
 };
 
 static struct gdsc gpu_cx_gdsc = {
-	.gdscr = 0x9106,
+	.gdscr = 0x9108,
 	.gds_hw_ctrl = 0x9094,
 	.en_rest_wait_val = 0x2,
 	.en_few_wait_val = 0x2,
