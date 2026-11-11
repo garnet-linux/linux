@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
+#include <dt-bindings/interconnect/qcom,icc.h>
+#include <dt-bindings/interconnect/qcom,sm7435-rpmh.h>
 #include <dt-bindings/clock/qcom,gcc-sm7435.h>
 #include <dt-bindings/clock/qcom,sm7435-gpucc.h>
 #include <dt-bindings/clock/qcom,rpmh.h>
@@ -16,6 +18,9 @@
 		      <0x0 0x03d9e000 0x0 0x1000>,
 		      <0x0 0x03d61000 0x0 0x800>;
 		reg-names = "kgsl_3d0_reg_memory", "cx_mem", "cx_dbgc";
+		interconnects = <&gem_noc MASTER_GFX3D QCOM_ICC_TAG_ALWAYS
+				&mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
+		interconnect-names = "gfx-mem";
 		status = "disabled";
 
 		zap-shader {
@@ -53,5 +58,25 @@
 		#clock-cells = <1>;
 		#reset-cells = <1>;
 		#power-domain-cells = <1>;
+	};
+};
+
+&apps_rsc {
+	apps_bcm_voter: bcm-voter {
+		compatible = "qcom,bcm-voter";
+	};
+};
+
+&soc {
+	gem_noc: interconnect-gem-noc {
+		compatible = "qcom,sm7435-gem-noc";
+		#interconnect-cells = <2>;
+		qcom,bcm-voters = <&apps_bcm_voter>;
+	};
+
+	mc_virt: interconnect-mc-virt {
+		compatible = "qcom,sm7435-mc-virt";
+		#interconnect-cells = <2>;
+		qcom,bcm-voters = <&apps_bcm_voter>;
 	};
 };
