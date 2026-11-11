@@ -24,6 +24,7 @@ enum {
 	DT_BI_TCXO,
 	DT_GPLL0_OUT_MAIN,
 	DT_GPLL0_OUT_MAIN_DIV,
+	DT_GCC_GPU_SNOC_DVM_GFX_CLK,
 };
 
 enum {
@@ -312,6 +313,10 @@ static struct clk_branch gpu_cc_cx_snoc_dvm_clk = {
 		.enable_mask = BIT(0),
 		.hw.init = &(const struct clk_init_data) {
 			.name = "gpu_cc_cx_snoc_dvm_clk",
+			.parent_data = &(const struct clk_parent_data) {
+				.index = DT_GCC_GPU_SNOC_DVM_GFX_CLK,
+			},
+			.num_parents = 1,
 			.ops = &clk_branch2_ops,
 		},
 	},

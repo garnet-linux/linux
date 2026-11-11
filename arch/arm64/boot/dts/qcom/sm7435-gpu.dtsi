@@ -29,6 +29,15 @@
 		      <0x0 0x03d50000 0x0 0x10000>,
 		      <0x0 0x0b290000 0x0 0x10000>;
 		reg-names = "gmu", "rscc", "gmu_pdc";
+		clocks = <&gpucc GPU_CC_AHB_CLK>,
+			 <&gpucc GPU_CC_CX_GMU_CLK>,
+			 <&gpucc GPU_CC_CXO_CLK>,
+			 <&gcc GCC_DDRSS_GPU_AXI_CLK>,
+			 <&gcc GCC_GPU_MEMNOC_GFX_CLK>,
+			 <&gpucc GPU_CC_HUB_CX_INT_CLK>;
+		clock-names = "ahb", "gmu", "cxo", "axi", "memnoc", "hub";
+		power-domains = <&gpucc GPU_CX_GDSC>, <&gpucc GPU_GX_GDSC>;
+		power-domain-names = "cx", "gx";
 		status = "disabled";
 	};
 };
@@ -38,8 +47,9 @@
 		compatible = "qcom,sm7435-gpucc";
 		reg = <0x0 0x03d90000 0x0 0xa000>;
 		clocks = <&rpmhcc RPMH_CXO_CLK>,
-			 <&gcc GCC_GPLL0>,
-			 <&gcc GCC_GPLL0_OUT_EVEN>;
+			 <&gcc GCC_GPU_GPLL0_CLK_SRC>,
+			 <&gcc GCC_GPU_GPLL0_DIV_CLK_SRC>,
+			 <&gcc GCC_GPU_SNOC_DVM_GFX_CLK>;
 		#clock-cells = <1>;
 		#reset-cells = <1>;
 		#power-domain-cells = <1>;
