@@ -276,7 +276,7 @@
 };
 
 &gpu {
-	status = "disabled";
+	status = "okay";
 
 	zap-shader {
 		firmware-name = "qcom/sm7435/garnet/a710_zap.mbn";
@@ -284,5 +284,5 @@
 };
 
 &gmu {
-	status = "disabled";
+	status = "okay";
 };

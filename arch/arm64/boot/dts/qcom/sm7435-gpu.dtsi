@@ -14,7 +14,7 @@
 
 &soc {
 	gpu: gpu@3d00000 {
-		compatible = "qcom,adreno";
+		compatible = "qcom,adreno-07010000", "qcom,adreno";
 		reg = <0x0 0x03d00000 0x0 0x40000>,
 		      <0x0 0x03d9e000 0x0 0x1000>,
 		      <0x0 0x03d61000 0x0 0x800>;
@@ -22,8 +22,9 @@
 		interconnects = <&gem_noc MASTER_GFX3D QCOM_ICC_TAG_ALWAYS
 				&mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
 		interconnect-names = "gfx-mem";
+		qcom,gmu = <&gmu>;
 		interrupts = <GIC_SPI 300 IRQ_TYPE_LEVEL_HIGH>;
-		iommus = <&adreno_smmu 0 0x0>, <&adreno_smmu 1 0x0>;
+		iommus = <&adreno_smmu 0 0x400>;
 		operating-points-v2 = <&gpu_opp_table>;
 
 		status = "disabled";
@@ -35,16 +36,28 @@
 		gpu_opp_table: opp-table {
 			compatible = "operating-points-v2";
 			/* FIXME: opp-level (rpmh ARC) and opp-peak-kBps per entry */
-			opp-600000000 { opp-hz = /bits/ 64 <600000000>; };
-			opp-500000000 { opp-hz = /bits/ 64 <500000000>; };
-			opp-345000000 { opp-hz = /bits/ 64 <345000000>; };
-			opp-295000000 { opp-hz = /bits/ 64 <295000000>; };
+			opp-600000000 {
+				opp-hz = /bits/ 64 <600000000>;
+				opp-level = <256>;
+			};
+			opp-500000000 {
+				opp-hz = /bits/ 64 <500000000>;
+				opp-level = <128>;
+			};
+			opp-345000000 {
+				opp-hz = /bits/ 64 <345000000>;
+				opp-level = <64>;
+			};
+			opp-295000000 {
+				opp-hz = /bits/ 64 <295000000>;
+				opp-level = <56>;
+			};
 		};
 	};
 
-	gmu: gmu@3d68000 {
+	gmu: gmu@3d6a000 {
 		compatible = "qcom,adreno-gmu";
-		reg = <0x0 0x03d68000 0x0 0x37000>,
+		reg = <0x0 0x03d6a000 0x0 0x35000>,
 		      <0x0 0x03d50000 0x0 0x10000>,
 		      <0x0 0x0b270000 0x0 0x10000>;
 		reg-names = "gmu", "rscc", "gmu_pdc";
@@ -52,6 +65,7 @@
 			     <GIC_SPI 305 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "hfi", "gmu";
 		iommus = <&adreno_smmu 5 0x400>;
+		operating-points-v2 = <&gmu_opp_table>;
 		clocks = <&gpucc GPU_CC_AHB_CLK>,
 			 <&gpucc GPU_CC_CX_GMU_CLK>,
 			 <&gpucc GPU_CC_CXO_CLK>,
@@ -62,6 +76,19 @@
 		power-domains = <&gpucc GPU_CX_GDSC>, <&gpucc GPU_GX_GDSC>;
 		power-domain-names = "cx", "gx";
 		status = "disabled";
+
+		gmu_opp_table: opp-table {
+			compatible = "operating-points-v2";
+			/* FIXME: add opp-level (rpmh ARC) once known */
+			opp-200000000 {
+				opp-hz = /bits/ 64 <200000000>;
+				opp-level = <64>;
+			};
+			opp-500000000 {
+				opp-hz = /bits/ 64 <500000000>;
+				opp-level = <128>;
+			};
+		};
 	};
 };
 
@@ -134,13 +161,15 @@
 			 <&gpucc GPU_CC_AHB_CLK>,
 			 <&gpucc GPU_CC_HLOS1_VOTE_GPU_SMMU_CLK>,
 			 <&gpucc GPU_CC_CX_GMU_CLK>,
-			 <&gpucc GPU_CC_HUB_CX_INT_CLK>;
+			 <&gpucc GPU_CC_HUB_CX_INT_CLK>,
+			 <&gpucc GPU_CC_HUB_AON_CLK>;
 		clock-names = "gcc_gpu_memnoc_gfx_clk",
 			      "gcc_gpu_snoc_dvm_gfx_clk",
 			      "gpu_cc_ahb_clk",
 			      "gpu_cc_hlos1_vote_gpu_smmu_clk",
 			      "gpu_cc_cx_gmu_clk",
-			      "gpu_cc_hub_cx_int_clk";
+			      "gpu_cc_hub_cx_int_clk",
+			      "gpu_cc_hub_aon_clk";
 		power-domains = <&gpucc GPU_CX_GDSC>;
 		dma-coherent;
 	};

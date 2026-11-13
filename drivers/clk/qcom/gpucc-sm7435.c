@@ -341,6 +341,7 @@ static struct gdsc gpu_gx_gdsc = {
 	.clk_dis_wait_val = 0x2,
 	.pd = {
 		.name = "gpu_gx_gdsc",
+		.power_on = gdsc_gx_do_nothing_enable,
 	},
 	.parent = &gpu_cx_gdsc.pd,
 	.pwrsts = PWRSTS_OFF_ON,

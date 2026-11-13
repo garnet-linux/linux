@@ -37,7 +37,7 @@ config DRM_MSM
 config DRM_MSM_GPU_STATE
 	bool
 	depends on DRM_MSM && (DEBUG_FS || DEV_COREDUMP)
-	default y
+	default n
 
 config DRM_MSM_GPU_SUDO
 	bool "Enable SUDO flag on submits"
