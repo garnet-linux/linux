@@ -329,6 +329,21 @@ static struct clk_branch gcc_ufs_phy_ahb_clk = {
 	},
 };
 
+static struct clk_branch gcc_disp_hf_axi_clk = {
+	.halt_reg = 0x3700c,
+	.halt_check = BRANCH_HALT_SKIP,
+	.hwcg_reg = 0x3700c,
+	.hwcg_bit = 1,
+	.clkr = {
+		.enable_reg = 0x3700c,
+		.enable_mask = BIT(0),
+		.hw.init = &(const struct clk_init_data) {
+			.name = "gcc_disp_hf_axi_clk",
+			.ops = &clk_branch2_ops,
+		},
+	},
+};
+
 static struct clk_branch gcc_ufs_phy_axi_clk = {
 	.halt_reg = 0x87018,
 	.halt_check = BRANCH_HALT_VOTED,
@@ -661,6 +676,7 @@ static struct clk_regmap *gcc_sm7435_clocks[] = {
 	[GCC_GPU_GPLL0_DIV_CLK_SRC] = &gcc_gpu_gpll0_div_clk_src.clkr,
 	[GCC_GPU_MEMNOC_GFX_CLK] = &gcc_gpu_memnoc_gfx_clk.clkr,
 	[GCC_GPU_SNOC_DVM_GFX_CLK] = &gcc_gpu_snoc_dvm_gfx_clk.clkr,
+	[GCC_DISP_HF_AXI_CLK] = &gcc_disp_hf_axi_clk.clkr,
 };
 
 static const struct qcom_reset_map gcc_sm7435_resets[] = {

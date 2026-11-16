@@ -65,6 +65,7 @@
 #define GCC_GPU_GPLL0_DIV_CLK_SRC		26
 #define GCC_GPU_MEMNOC_GFX_CLK			27
 #define GCC_GPU_SNOC_DVM_GFX_CLK		28
+#define GCC_DISP_HF_AXI_CLK			29
 
 /* GCC resets */
 #define GCC_UFS_PHY_BCR				0
