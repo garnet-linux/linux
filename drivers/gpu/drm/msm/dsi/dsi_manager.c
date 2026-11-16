@@ -319,6 +319,26 @@ host_en_fail:
 	dsi_mgr_bridge_power_off(bridge);
 }
 
+/*
+ * Runs after the DPU timing engine was started (encoder enable) and before
+ * the panel's enable(): from here on the video stream is running and DCS
+ * commands (backlight) go out in BLLP like on any other video mode panel.
+ */
+static void dsi_mgr_bridge_enable(struct drm_bridge *bridge,
+				  struct drm_atomic_commit *commit)
+{
+	int id = dsi_mgr_bridge_get_id(bridge);
+	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
+	struct msm_dsi *msm_dsi1 = dsi_mgr_get_dsi(DSI_1);
+
+	if (IS_BONDED_DSI() && !IS_MASTER_DSI_LINK(id))
+		return;
+
+	msm_dsi_host_video_start(msm_dsi->host);
+	if (IS_BONDED_DSI() && msm_dsi1)
+		msm_dsi_host_video_start(msm_dsi1->host);
+}
+
 void msm_dsi_manager_tpg_enable(void)
 {
 	struct msm_dsi *m_dsi = dsi_mgr_get_dsi(DSI_0);
@@ -452,6 +472,7 @@ static const struct drm_bridge_funcs dsi_mgr_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.attach = dsi_mgr_bridge_attach,
 	.atomic_pre_enable = dsi_mgr_bridge_pre_enable,
+	.atomic_enable = dsi_mgr_bridge_enable,
 	.atomic_post_disable = dsi_mgr_bridge_post_disable,
 	.mode_set = dsi_mgr_bridge_mode_set,
 	.mode_valid = dsi_mgr_bridge_mode_valid,

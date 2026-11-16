@@ -238,9 +238,8 @@ void dpu_vbif_clear_errors(struct dpu_kms *dpu_kms)
 	vbif = dpu_kms->hw_vbif;
 	if (vbif && vbif->ops.clear_errors) {
 		vbif->ops.clear_errors(vbif, &pnd, &src);
-		if (pnd || src) {
-			DRM_DEBUG_KMS("VBIF: pnd 0x%X, src 0x%X\n", pnd, src);
-		}
+		if (pnd || src)
+			pr_err("GARNET-DBG VBIF: pnd 0x%X src 0x%X\n", pnd, src);
 	}
 }
 

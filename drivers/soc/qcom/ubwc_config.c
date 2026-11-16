@@ -62,14 +62,14 @@ static const struct qcom_ubwc_cfg_data ubwc_3_1_hbb16  = {
 	.highest_bank_bit = 16,
 };
 
-static const struct qcom_ubwc_cfg_data ubwc_4_0_hbb16 = {
-	.ubwc_enc_version = UBWC_4_0,
-	.highest_bank_bit = 16,
-};
-
 static const struct qcom_ubwc_cfg_data ubwc_4_0_hbb15 = {
 	.ubwc_enc_version = UBWC_4_0,
 	.highest_bank_bit = 15,
+};
+
+static const struct qcom_ubwc_cfg_data ubwc_4_0_hbb16 = {
+	.ubwc_enc_version = UBWC_4_0,
+	.highest_bank_bit = 16,
 };
 
 static const struct qcom_ubwc_cfg_data ubwc_5_0_hbb15 = {
@@ -174,9 +174,9 @@ static const struct of_device_id qcom_ubwc_configs[] __maybe_unused = {
 	{ .compatible = "qcom,sm7150", .data = &ubwc_2_0_hbb14, },
 	{ .compatible = "qcom,sm7225", .data = &ubwc_2_0_hbb14, },
 	{ .compatible = "qcom,sm7325", .data = &ubwc_3_1_hbb14, },
+	{ .compatible = "qcom,sm7435", .data = &ubwc_4_0_hbb15, },
 	{ .compatible = "qcom,sm8150", .data = &ubwc_3_0_hbb15, },
 	{ .compatible = "qcom,sm8250", .data = &ubwc_4_0_hbb16, },
-	{ .compatible = "qcom,sm7435", .data = &ubwc_4_0_hbb15, },
 	{ .compatible = "qcom,sm8350", .data = &ubwc_4_0_hbb16, },
 	{ .compatible = "qcom,sm8450", .data = &ubwc_4_0_hbb16, },
 	{ .compatible = "qcom,sm8550", .data = &ubwc_4_0_hbb16, },

@@ -46,6 +46,12 @@ void dpu_encoder_toggle_vblank_for_crtc(struct drm_encoder *encoder,
 
 void dpu_encoder_prepare_for_kickoff(struct drm_encoder *encoder);
 
+/**
+ * dpu_encoder_restore_intf_cfg - rewrite the ctl_path interface config
+ * @encoder:	encoder pointer
+ */
+void dpu_encoder_restore_intf_cfg(struct drm_encoder *encoder);
+
 void dpu_encoder_trigger_kickoff_pending(struct drm_encoder *encoder);
 
 void dpu_encoder_kickoff(struct drm_encoder *encoder);
